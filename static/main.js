@@ -1,8 +1,5 @@
 // Default settings and initialization
 document.documentElement.setAttribute('data-theme', 'dark');
-document.getElementById('input-text').focus();
-
-document.getElementById('input-text').focus();
 
 // Toggle fullscreen input
 function toggleFullscreenInput() {
@@ -785,6 +782,7 @@ document.getElementById('file-input').addEventListener('change', async function 
     if (e.target.files && e.target.files.length > 0) {
         await uploadImage(Array.from(e.target.files));
     }
+    e.target.value = '';
 });
 
 async function uploadImage(files) {
@@ -2728,3 +2726,41 @@ function updateScrollHomeFab() {
 window.addEventListener('scroll', updateScrollHomeFab, { passive: true });
 window.addEventListener('resize', updateScrollHomeFab);
 document.addEventListener('DOMContentLoaded', updateScrollHomeFab);
+
+// --- Split input container: one segment expands to fill the bar when interacted
+// with; the others collapse. Segments: text / image-upload / file-upload. ---
+function setActiveSegment(name) {
+    const c = document.querySelector('.input-container');
+    if (!c) return;
+    c.classList.remove('active-text', 'active-image', 'active-file');
+    if (name) c.classList.add('active-' + name);
+}
+
+// Open an upload picker (kind = 'image' | 'file'): expand its segment and open the
+// OS file dialog, then contract again once the dialog closes (chosen or cancelled).
+function openUpload(kind) {
+    setActiveSegment(kind);
+    const input = document.getElementById(kind === 'image' ? 'file-input' : 'file-input2');
+    if (!input) return;
+    // The window regains focus when the file dialog closes (covers cancel too).
+    const onReturn = () => {
+        window.removeEventListener('focus', onReturn);
+        setTimeout(() => setActiveSegment(null), 150);
+    };
+    window.addEventListener('focus', onReturn);
+    input.click();
+}
+
+function initSplitInput() {
+    const ta = document.getElementById('input-text');
+    if (!ta) return;
+    ta.addEventListener('focus', () => setActiveSegment('text'));
+    ta.addEventListener('blur', () => {
+        // Contract only when the user leaves an empty text box
+        if (!ta.value.trim()) setActiveSegment(null);
+    });
+    // If there's restored draft text on load, start expanded
+    if (ta.value.trim()) setActiveSegment('text');
+}
+
+document.addEventListener('DOMContentLoaded', initSplitInput);

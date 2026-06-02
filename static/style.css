@@ -111,23 +111,181 @@ body {
 }
 
 .input-container {
-    /* width: 100%; */
-    background: var(--input-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    /* border: 1px solid var(--input-border); */
-    padding: 16px 20px;
-    border-radius: 28px;
+    padding: 0;
     display: flex;
-    flex-direction: column;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    flex-direction: row;
+    align-items: stretch;
+    min-height: 150px;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     transition: all 0.3s ease;
 }
 
-.input-container:focus-within {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+/* No common container background — focus emphasis lives on the text bubble */
+.seg-text:focus-within {
     border-color: #ffffff65;
     background: var(--txtbg-color);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+/* --- Split input: text / image-upload / file-upload segments --- */
+.input-seg {
+    flex-grow: 1;
+    flex-shrink: 1;
+    overflow: hidden;
+    opacity: 1;
+    transition: flex-basis 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease,
+        padding 0.25s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+/* Text segment: textarea + send button stacked */
+.seg-text {
+    flex-basis: 42%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 14px 16px;
+    background: var(--input-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--input-border);
+    border-radius: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.seg-text textarea {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+}
+
+.seg-text #add-btn {
+    align-self: flex-end;
+    flex: 0 0 auto;
+}
+
+/* Upload drop-zone segments (image / file) */
+.seg-upload {
+    flex-basis: 27%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    border: 2px dashed #d3d3d3;
+    border-radius: 20px;
+	background: linear-gradient(rgba(128, 128, 128, 0.32), rgba(128, 128, 128, 0.80)), var(--input-bg);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    color: var(--text-color);
+    cursor: pointer;
+    text-align: center;
+    font-size: 13px;
+    min-width: 0;
+}
+
+.seg-upload i {
+    font-size: 26px;
+    opacity: 1;
+    transition: opacity 0.2s ease;
+}
+
+.seg-upload span {
+    opacity: 1;
+    line-height: 1.3;
+    transition: opacity 0.2s ease;
+}
+
+.seg-upload:hover {
+    border-color: #ebebeb;
+    background-color: rgba(128, 128, 128, 0.08);
+}
+
+.seg-upload:hover i,
+.seg-upload:hover span {
+    opacity: 1;
+}
+
+/* Vertical separator bars between segments */
+.input-sep {
+    flex: 0 0 auto;
+    width: 2px;
+    margin: 0 5px;
+    border-radius: 3px;
+    background: dimgrey;
+    align-self: stretch;
+    transition: opacity 0.2s ease, margin 0.25s ease;
+    box-shadow: 0px 0px 1px 1px dimgray;
+}
+
+/* Inactive segments + separators collapse away when one segment is active */
+.input-container.active-text .seg-upload,
+.input-container.active-text .input-sep,
+.input-container.active-image .seg-text,
+.input-container.active-image .seg-file,
+.input-container.active-image .input-sep,
+.input-container.active-file .seg-text,
+.input-container.active-file .seg-image,
+.input-container.active-file .input-sep {
+    flex-grow: 0;
+    flex-basis: 0;
+    opacity: 0;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 0;
+    margin-right: 0;
+    border-width: 0;
+    pointer-events: none;
+}
+
+/* The active segment fills the whole bar */
+.input-container.active-text .seg-text,
+.input-container.active-image .seg-image,
+.input-container.active-file .seg-file {
+    flex-grow: 1;
+    flex-basis: 100%;
+}
+
+/* Small screens: stack the segments and keep them all visible/usable */
+@media (max-width: 768px) {
+    .input-container {
+        flex-direction: column;
+        min-height: 0;
+        gap: 10px;
+    }
+
+    .input-container .input-seg {
+        flex-basis: auto !important;
+        flex-grow: 0 !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        width: 100%;
+        box-sizing: border-box;
+        /* equal width for all three bubbles */
+    }
+
+    /* Keep comfortable text padding in every state (segments never collapse on mobile) */
+    .input-container .seg-text {
+        padding: 14px 16px !important;
+    }
+
+    .seg-upload {
+        border-width: 2px !important;
+        padding: 16px !important;
+    }
+
+    .seg-text textarea {
+        min-height: 70px;
+    }
+
+    .input-sep {
+        display: none;
+    }
 }
 
 /* style="max-width: 300px; max-height: 300px; */
@@ -1163,7 +1321,7 @@ a:hover {
     }
 
     .input-container {
-        padding: 12px 14px;
+        padding: 12px 0px;
         border-radius: 20px;
     }
 
