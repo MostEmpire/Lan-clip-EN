@@ -27,6 +27,7 @@ mimetypes.add_type('image/svg+xml', '.svg')
 
 PINNED_FILE = 'pinned.json'
 PERMISSION_LOCK_FILE = 'perm_lock.json'
+EXPIRY_FILE = 'expiry.json'
 
 # Set the default port
 port = 5002 if sys.platform == 'darwin' else 5000
@@ -60,6 +61,96 @@ def bump_revision():
     with _revision_lock:
         data_revision += 1
         return data_revision
+
+# --- Auto-delete (per-card expiry) ---
+EXPIRY_DURATIONS = {
+    'hour': 3600,
+    'day': 86400,
+    'week': 604800,
+    'month': 30 * 86400,
+    'year': 365 * 86400,
+}
+# Serializes expiry.json access and the pruning of expired cards (waitress is multithreaded)
+_cards_lock = threading.Lock()
+
+def load_expiry():
+    try:
+        if os.path.exists(EXPIRY_FILE):
+            with open(EXPIRY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception as e:
+        print(f"Error loading expiry file: {str(e)}")
+    return {}
+
+def save_expiry(expiry_map):
+    try:
+        with open(EXPIRY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(expiry_map, f)
+    except Exception as e:
+        print(f"Error saving expiry file: {str(e)}")
+
+def delete_card_assets(card_id):
+    """Remove the uploaded files / images referenced by a card before deleting it."""
+    file_path = os.path.join(CARDS_DIR, f'{card_id}.txt')
+    if not os.path.exists(file_path):
+        return
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        for filename in re.findall(r'<a href="/uploads/([^"]+)"', content):
+            try:
+                p = os.path.join(UPLOAD_FOLDER, filename)
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+        for img_name in re.findall(r'/images/([^"]+)', content):
+            try:
+                p = os.path.join(get_app_path(), 'images', img_name)
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+def prune_expired_cards():
+    """Delete cards whose auto-delete time has passed. Returns how many were removed.
+    Guarded by _cards_lock so concurrent prunes (background thread + requests) can't race."""
+    removed = []
+    with _cards_lock:
+        expiry_map = load_expiry()
+        if not expiry_map:
+            return 0
+        now = time.time()
+        changed = False
+        for card_id, exp in list(expiry_map.items()):
+            try:
+                if exp is None:
+                    continue
+                if float(exp) <= now:
+                    delete_card_assets(card_id)
+                    file_path = os.path.join(CARDS_DIR, f'{card_id}.txt')
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    pinned_ids = load_pinned()
+                    if card_id in pinned_ids:
+                        pinned_ids.remove(card_id)
+                        save_pinned(pinned_ids)
+                    del expiry_map[card_id]
+                    changed = True
+                    removed.append(card_id)
+            except Exception as e:
+                print(f"Error auto-deleting card {card_id}: {str(e)}")
+        if changed:
+            save_expiry(expiry_map)
+    if removed:
+        load_cards()
+        bump_revision()
+        print(f"Auto-delete: removed {len(removed)} expired card(s): {', '.join(removed)}")
+    return len(removed)
 
 def is_authenticated():
     # Try to obtain the password from various sources
@@ -145,6 +236,7 @@ def load_cards():
     try:
         ensure_cards_dir()
         pinned_ids = load_pinned()
+        expiry_map = load_expiry()
         cards = []
         card_files = glob.glob(os.path.join(CARDS_DIR, '*.txt'))
         # Sort by numeric value
@@ -159,7 +251,8 @@ def load_cards():
                     'content': f.read().strip(),
                     'time': time_str,
                     'timestamp': mtime,
-                    'pinned': card_id in pinned_ids
+                    'pinned': card_id in pinned_ids,
+                    'expiry': expiry_map.get(card_id)
                 })
         
         # Sort: pinned first, the rest by ID in descending order (the original logic sorts by ID then reverses)
@@ -227,6 +320,7 @@ def save_card(content, timestamp=None):
 @app.route('/', methods=['GET', 'POST'])
 def home():
     global cards_cache
+    prune_expired_cards()
     if not cards_cache:  # Always try to load, or adjust as needed
         cards_cache = load_cards()
     else:
@@ -281,6 +375,10 @@ def clear_history():
             for file in os.listdir(UPLOAD_FOLDER):
                 os.remove(os.path.join(UPLOAD_FOLDER, file))
 
+        # Reset all auto-delete entries
+        with _cards_lock:
+            save_expiry({})
+
         log_action("CLEAR_HISTORY", "Cleared all records and files")
         bump_revision()
 
@@ -330,7 +428,14 @@ def delete_card():
                 if card_id in pinned_ids:
                     pinned_ids.remove(card_id)
                     save_pinned(pinned_ids)
-                
+
+                # Remove any auto-delete entry for this card
+                with _cards_lock:
+                    expiry_map = load_expiry()
+                    if card_id in expiry_map:
+                        del expiry_map[card_id]
+                        save_expiry(expiry_map)
+
                 log_action("DELETE_CARD", f"ID: {card_id}")
                 cards_cache = load_cards()
                 bump_revision()
@@ -425,14 +530,23 @@ def add_card():
     try:
         content = request.json.get('text', '')
         timestamp = request.json.get('timestamp')
+        auto_delete = request.json.get('auto_delete')  # 'hour'|'day'|'week'|'month'|'year', else permanent
         if content:
             # Automatically process URL links
             processed_content = process_text_content(content)
             new_id = save_card(processed_content, timestamp=timestamp)
             if new_id:
-                load_cards() # Ensure sorting is updated
+                expiry_ts = None
+                if auto_delete in EXPIRY_DURATIONS:
+                    base = timestamp if timestamp else time.time()
+                    expiry_ts = base + EXPIRY_DURATIONS[auto_delete]
+                    with _cards_lock:
+                        expiry_map = load_expiry()
+                        expiry_map[str(new_id)] = expiry_ts
+                        save_expiry(expiry_map)
+                load_cards() # Ensure sorting and expiry are reflected
                 log_action("API_ADD_CARD", f"ID: {new_id}, content: {processed_content[:30]}...")
-                return jsonify({'status': 'success', 'content': processed_content, 'id': str(new_id), 'rev': data_revision})
+                return jsonify({'status': 'success', 'content': processed_content, 'id': str(new_id), 'rev': data_revision, 'expiry': expiry_ts})
         return jsonify({'status': 'error', 'message': 'Content is empty'}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -440,6 +554,7 @@ def add_card():
 @app.route('/api/cards', methods=['GET'])
 def get_cards_api():
     global cards_cache
+    prune_expired_cards()
     # Always ensure the cache is up to date, or trigger loading based on business logic
     if not cards_cache:
         cards_cache = load_cards()
@@ -554,6 +669,19 @@ def import_content():
 def get_revision():
     # Lightweight endpoint clients poll to detect changes (live refresh)
     return jsonify({'rev': data_revision})
+
+def _auto_delete_worker():
+    # Periodically remove expired cards so they disappear even without page activity;
+    # the revision bump then lets live-refresh clients pick up the change.
+    while True:
+        try:
+            prune_expired_cards()
+        except Exception as e:
+            print(f"Auto-delete worker error: {str(e)}")
+        time.sleep(60)
+
+# Start the background pruner (runs under both `flask run` and `python app.py`)
+threading.Thread(target=_auto_delete_worker, daemon=True).start()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the LAN clipboard app.')

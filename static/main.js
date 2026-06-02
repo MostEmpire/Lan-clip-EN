@@ -113,8 +113,12 @@ function formatTimestamp(ts) {
 function updateAllTimes() {
     document.querySelectorAll('.card-time[data-timestamp]').forEach(el => {
         const ts = parseFloat(el.dataset.timestamp);
-        if (ts) el.textContent = formatTimestamp(ts);
+        if (!ts) return;
+        const tsEl = el.querySelector('.ts-text');
+        if (tsEl) tsEl.textContent = formatTimestamp(ts);
+        else el.textContent = formatTimestamp(ts);
     });
+    updateExpiryDisplays();
 }
 
 // Theme toggle
@@ -350,7 +354,10 @@ function getCardHtml(card) {
                 </button>
             </div>
             <pre class="card-content">${card.content}</pre>
-            <div class="card-time" data-timestamp="${card.timestamp || ''}">${displayTime}</div>
+            <div class="card-time" data-timestamp="${card.timestamp || ''}">
+                <span class="ts-text">${displayTime}</span>
+                <span class="card-expiry" data-expiry="${card.expiry || ''}"><i class="fas fa-hourglass-half"></i> <span class="card-expiry-text"></span></span>
+            </div>
         </div>`;
 }
 
@@ -909,18 +916,21 @@ async function uploadFiles(files) {
                     const fileLink = generateFileLink(file, fileUrl, fileIcon, fileSize);
 
                     // Submit via the API instead of clicking the button
+                    const autoDelete = getSelectedAutoDelete();
+                    const body = { text: fileLink };
+                    if (autoDelete) body.auto_delete = autoDelete;
                     const addResponse = await fetch('/api/add_card', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ text: fileLink })
+                        body: JSON.stringify(body)
                     });
                     const addResult = await addResponse.json();
                     noteLocalRevision(addResult.rev);
 
                     // Add the new card directly on the frontend
-                    addCardToPage(fileLink, addResult.id);
+                    addCardToPage(fileLink, addResult.id, addResult.expiry);
                 }
             } catch (error) {
                 console.error('File upload failed:', error);
@@ -931,6 +941,7 @@ async function uploadFiles(files) {
         }
     } finally {
         hideUploadProgress();
+        collapseAutoDelete();
     }
 }
 
@@ -954,7 +965,7 @@ function generateFileLink(file, fileUrl, fileIcon, fileSize) {
 }
 
 // Add a new card to the page
-function addCardToPage(fileLink, id) {
+function addCardToPage(fileLink, id, expiry) {
     const cardContainer = document.getElementById('card-container');
     if (!cardContainer) return;
 
@@ -963,7 +974,8 @@ function addCardToPage(fileLink, id) {
         content: fileLink,
         pinned: false,
         timestamp: Date.now() / 1000,
-        time: getCurrentFormattedTime()
+        time: getCurrentFormattedTime(),
+        expiry: expiry || null
     };
 
     const html = getCardHtml(card);
@@ -975,6 +987,7 @@ function addCardToPage(fileLink, id) {
     } else {
         cardContainer.insertAdjacentHTML('afterbegin', html);
     }
+    updateExpiryDisplays();
 }
 
 function getCurrentFormattedTime() {
@@ -1361,8 +1374,11 @@ async function addCard() {
 
     if (!content) return;
 
+    const autoDelete = getSelectedAutoDelete();
+
     try {
         const requestData = { text: content };
+        if (autoDelete) requestData.auto_delete = autoDelete;
 
         const response = await fetch('/api/add_card', {
             method: 'POST',
@@ -1400,11 +1416,16 @@ async function addCard() {
                     </button>
                 </div>
                 <pre class="card-content">${content}</pre>
-                <div class="card-time" data-timestamp="${timestamp}">${timeStr}</div>
+                <div class="card-time" data-timestamp="${timestamp}">
+                    <span class="ts-text">${timeStr}</span>
+                    <span class="card-expiry" data-expiry="${result.expiry || ''}"><i class="fas fa-hourglass-half"></i> <span class="card-expiry-text"></span></span>
+                </div>
             `;
 
             // Insert the new card at the very top
             cardContainer.insertBefore(newCard, cardContainer.firstChild);
+            updateExpiryDisplays();
+            collapseAutoDelete();
 
             // Clear the input box and saved history
             textarea.value = '';
@@ -2754,13 +2775,104 @@ function openUpload(kind) {
 function initSplitInput() {
     const ta = document.getElementById('input-text');
     if (!ta) return;
+    const segText = document.getElementById('seg-text');
+
     ta.addEventListener('focus', () => setActiveSegment('text'));
-    ta.addEventListener('blur', () => {
-        // Contract only when the user leaves an empty text box
-        if (!ta.value.trim()) setActiveSegment(null);
-    });
+
+    if (segText) {
+        // Interacting with the controls inside the bubble (auto-delete button/slider
+        // or Send) must NOT contract it. Pressing within the controls suppresses the
+        // contraction that the resulting blur would otherwise trigger.
+        let suppressContract = false;
+        const controls = segText.querySelector('.seg-text-controls');
+        if (controls) {
+            controls.addEventListener('pointerdown', () => {
+                suppressContract = true;
+                // Clear after the synchronous blur/focusout from this press has passed
+                setTimeout(() => { suppressContract = false; }, 0);
+            });
+        }
+        // Contract only when focus genuinely leaves the whole text bubble and it's empty
+        segText.addEventListener('focusout', (e) => {
+            if (suppressContract) return;
+            const next = e.relatedTarget;
+            if (next && segText.contains(next)) return; // focus stayed inside the bubble
+            if (!ta.value.trim()) setActiveSegment(null);
+        });
+    }
+
     // If there's restored draft text on load, start expanded
     if (ta.value.trim()) setActiveSegment('text');
 }
 
 document.addEventListener('DOMContentLoaded', initSplitInput);
+
+// --- Auto-delete: slider control + per-card countdown ---
+const AUTO_DELETE_OPTIONS = ['hour', 'day', 'week', 'month', 'year', 'forever'];
+const AUTO_DELETE_LABELS = ['Hour', 'Day', 'Week', 'Month', 'Year', 'Forever'];
+
+function updateAutoDeleteLabel() {
+    const range = document.getElementById('ad-range');
+    if (!range) return;
+    const idx = parseInt(range.value, 10);
+    // Highlight the option the thumb is currently at
+    document.querySelectorAll('.ad-ticks span').forEach((el, i) => {
+        el.classList.toggle('active', i === idx);
+    });
+}
+
+// The selected lifetime keyword, or null for "Forever" (permanent)
+function getSelectedAutoDelete() {
+    const range = document.getElementById('ad-range');
+    if (!range) return null;
+    const kw = AUTO_DELETE_OPTIONS[parseInt(range.value, 10)];
+    return (kw && kw !== 'forever') ? kw : null;
+}
+
+// Collapse the slider pill back to the circle after an upload (keeps the chosen value,
+// since the timer is a sticky setting that applies to subsequent uploads)
+function collapseAutoDelete() {
+    const control = document.getElementById('auto-delete-control');
+    if (control) control.classList.remove('expanded');
+}
+
+// Expand/contract the auto-delete circle into its slider pill
+function toggleAutoDelete() {
+    const control = document.getElementById('auto-delete-control');
+    if (control) control.classList.toggle('expanded');
+}
+
+// Format remaining time as "<months>M <days>D <hours>h <minutes>m" (zero leading units dropped)
+function formatCountdown(remainingMs) {
+    if (remainingMs <= 0) return 'Expiring…';
+    let s = Math.floor(remainingMs / 1000);
+    const months = Math.floor(s / (30 * 86400)); s -= months * 30 * 86400;
+    const days = Math.floor(s / 86400); s -= days * 86400;
+    const hours = Math.floor(s / 3600); s -= hours * 3600;
+    const minutes = Math.floor(s / 60);
+    const parts = [];
+    if (months) parts.push(months + 'M');
+    if (days) parts.push(days + 'D');
+    if (hours) parts.push(hours + 'h');
+    parts.push(minutes + 'm');
+    return parts.join(' ');
+}
+
+function updateExpiryDisplays() {
+    document.querySelectorAll('.card-expiry').forEach(el => {
+        const txt = el.querySelector('.card-expiry-text');
+        if (!txt) return;
+        const raw = el.dataset.expiry;
+        if (!raw) {
+            txt.textContent = 'Permanent';
+            return;
+        }
+        txt.textContent = formatCountdown(parseFloat(raw) * 1000 - Date.now());
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    updateAutoDeleteLabel();
+    updateExpiryDisplays();
+});
+setInterval(updateExpiryDisplays, 60000);
