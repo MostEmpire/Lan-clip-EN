@@ -173,26 +173,34 @@
                 </div>
             </div>
             <div class="input-container">
-                <textarea id="input-text" name="text" placeholder="Type text or paste an image..."></textarea>
-                <div class="button-group">
+                <!-- Text segment: expands on focus, contracts when blurred & empty -->
+                <div class="input-seg seg-text" id="seg-text">
+                    <textarea id="input-text" name="text" placeholder="Type text or paste an image..."></textarea>
                     <button onclick="addCard()" id="add-btn" class="icon-button" title="Add">
                         <i class="fas fa-paper-plane"></i>
                         <span style="margin-left: 5px;">Send</span>
                     </button>
-                    <button onclick="document.getElementById('file-input').click()" class="icon-button" title="Upload image">
-                        <i class="fas fa-image"></i>
-                        <input type="file" id="file-input" style="display: none;" accept="image/*" multiple
-                            onchange="uploadImage(this.files); this.value='';">
-                    </button>
-                    <button onclick="document.getElementById('file-input2').click()" class="icon-button" title="Upload file">
-                        <i class="fas fa-file-upload"></i>
-                        <input type="file" id="file-input2" style="display: none;" accept="*" multiple
-                            onchange="uploadFiles(this.files); this.value='';">
-                    </button>
-                    <button onclick="toggleFullscreenInput()" id="fullscreen-btn" class="icon-button" title="Fullscreen edit"
-                        style="margin-left: auto;">
-                        <i class="fas fa-expand"></i>
-                    </button>
+                </div>
+
+                <div class="input-sep"></div>
+
+                <!-- Image upload segment -->
+                <div class="input-seg seg-upload seg-image" id="seg-image" onclick="openUpload('image')"
+                    title="Upload image">
+                    <i class="fas fa-image"></i>
+                    <span>Choose an image, drag&amp;drop, or CTRL+V</span>
+                    <input type="file" id="file-input" style="display: none;" accept="image/*" multiple>
+                </div>
+
+                <div class="input-sep"></div>
+
+                <!-- File upload segment -->
+                <div class="input-seg seg-upload seg-file" id="seg-file" onclick="openUpload('file')"
+                    title="Upload file">
+                    <i class="fas fa-file-upload"></i>
+                    <span>Choose a file or drag&amp;drop it here.</span>
+                    <input type="file" id="file-input2" style="display: none;" accept="*" multiple
+                        onchange="uploadFiles(this.files); this.value='';">
                 </div>
             </div>
         </div>
