@@ -172,14 +172,17 @@
                     </div>
                 </div>
             </div>
-            <div class="input-container">
+            <div class="upload-panel">
+                <div class="input-container">
                 <!-- Text segment: expands on focus, contracts when blurred & empty -->
                 <div class="input-seg seg-text" id="seg-text">
                     <textarea id="input-text" name="text" placeholder="Type text or paste an image..."></textarea>
-                    <button onclick="addCard()" id="add-btn" class="icon-button" title="Add">
-                        <i class="fas fa-paper-plane"></i>
-                        <span style="margin-left: 5px;">Send</span>
-                    </button>
+                    <div class="seg-text-controls">
+                        <button onclick="addCard()" id="add-btn" class="icon-button" title="Add">
+                            <i class="fas fa-paper-plane"></i>
+                            <span style="margin-left: 5px;">Send</span>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="input-sep"></div>
@@ -202,6 +205,18 @@
                     <input type="file" id="file-input2" style="display: none;" accept="*" multiple
                         onchange="uploadFiles(this.files); this.value='';">
                 </div>
+            </div>
+            <!-- Shared auto-delete setting: applies to text, image, and file uploads -->
+            <div class="upload-options">
+                <span class="upload-options-label"><i class="fas fa-hourglass-half"></i> Keep for:</span>
+                <div class="ad-track-wrap">
+                    <input type="range" id="ad-range" min="0" max="5" step="1" value="5"
+                        oninput="updateAutoDeleteLabel()">
+                    <div class="ad-ticks">
+                        <span>Hour</span><span>Day</span><span>Week</span><span>Month</span><span>Year</span><span>Forever</span>
+                    </div>
+                </div>
+            </div>
             </div>
         </div>
 
@@ -235,7 +250,11 @@
 
                 </div>
                 <pre class="card-content">{{ card.content | safe }}</pre>
-                <div class="card-time" data-timestamp="{{ card.timestamp }}">{{ card.time }}</div>
+                <div class="card-time" data-timestamp="{{ card.timestamp }}">
+                    <span class="ts-text">{{ card.time }}</span>
+                    <span class="card-expiry" data-expiry="{{ card.expiry if card.expiry else '' }}"><i
+                            class="fas fa-hourglass-half"></i> <span class="card-expiry-text"></span></span>
+                </div>
             </div>
             {% endfor %}
         </div>

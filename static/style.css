@@ -14,7 +14,7 @@
     --text-color: #e2e2e6;
     --border-color: #44474e;
     --txtbg-color: rgba(30, 32, 34, 0.85);
-    --link-color: #d2e3ff;
+    --link-color: #9FCFFF;
     --header-bg: rgba(26, 28, 30, 0.7);
     --input-bg: rgba(30, 32, 34, 0.7);
     --input-border: rgba(255, 255, 255, 0.1);
@@ -95,7 +95,10 @@ body {
     top: 0;
     left: 0;
     width: 100%;
-    height: 100%;
+    height: 100vh;
+    /* Pin to the large viewport height — constant, so the background does not
+       rescale when the mobile browser toolbar slides in/out. */
+    height: 100lvh;
     /* background-image: url('16.jpg'); */
     background-position: center;
     background-size: cover;
@@ -108,6 +111,16 @@ body {
     margin: 24px 0 40px;
     width: 100%;
     max-width: 800px;
+}
+
+/* Subtle panel enclosing the three upload bubbles + the "keep upload for" row */
+.upload-panel {
+    border-radius: 24px;
+    background: rgba(71, 71, 71, 0.20);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    border: 1px solid var(--input-border);
+    padding: 14px;
 }
 
 .input-container {
@@ -162,9 +175,140 @@ body {
     width: 100%;
 }
 
+/* Bottom row of the text bubble: auto-delete control + Send, packed to the right
+   (so the control expands leftward) with a 12px gap between them */
+.seg-text-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    flex-wrap: nowrap;
+}
+
 .seg-text #add-btn {
-    align-self: flex-end;
     flex: 0 0 auto;
+}
+
+/* Auto-delete slider — only visible while the text bubble is active (text selected).
+   Compact + fixed width so it doesn't change the input-container height. */
+/* Shared row under the three upload bubbles: applies the timer to any upload type */
+.upload-options {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 10px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--text-color);
+}
+
+.upload-options-label {
+    opacity: 1;
+    white-space: nowrap;
+}
+
+.upload-options-label i {
+    margin-right: 5px;
+}
+
+/* Slider sits inline, right next to the "Keep for:" label (no pill/background) */
+.ad-track-wrap {
+    position: relative;
+    width: 270px;
+    flex: 0 1 270px;
+    min-width: 0;
+    margin-left: 8px;
+    opacity: 1;
+}
+
+#ad-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 14px;
+    background: transparent;
+    cursor: pointer;
+    margin: 0;
+}
+
+/* Uniform track — no filled "tail" */
+#ad-range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-color);
+}
+
+#ad-range::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-color);
+}
+
+#ad-range::-moz-range-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-color);
+}
+
+/* Slightly rounded rectangular thumb (not a circle) */
+#ad-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 12px;
+    border-radius: 4px;
+    background: var(--link-color);
+    border: none;
+    margin-top: -4px;
+    cursor: pointer;
+}
+
+#ad-range::-moz-range-thumb {
+    width: 18px;
+    height: 12px;
+    border-radius: 4px;
+    background: var(--link-color);
+    border: none;
+    cursor: pointer;
+}
+
+/* Labels centered under each thumb snap position (270px track, 18px thumb) */
+.ad-ticks {
+    position: relative;
+    height: 11px;
+    margin-top: 1px;
+}
+
+.ad-ticks span {
+    position: absolute;
+    transform: translateX(-50%);
+    font-size: 9px;
+    line-height: 11px;
+    opacity: 0.9;
+    white-space: nowrap;
+}
+
+.ad-ticks span:nth-child(1) { left: 3.33%; }
+.ad-ticks span:nth-child(2) { left: 22%; }
+.ad-ticks span:nth-child(3) { left: 40.67%; }
+.ad-ticks span:nth-child(4) { left: 59.33%; }
+.ad-ticks span:nth-child(5) { left: 78%; }
+.ad-ticks span:nth-child(6) { left: 96.67%; }
+
+/* Highlight the option the thumb is currently at */
+.ad-ticks span.active {
+    color: var(--link-color);
+    opacity: 1;
+    font-weight: 600;
+}
+
+/* Mobile: keep the expanded slider on the same row as Send — reclaim the text
+   bubble's horizontal padding for the controls row and tighten the gaps/labels. */
+@media (max-width: 768px) {
+    .seg-text-controls {
+        margin-left: -12px;
+        margin-right: -12px;
+    }
 }
 
 /* Upload drop-zone segments (image / file) */
@@ -658,6 +802,16 @@ body.simple-mode .card-header .icon-button:hover {
     z-index: 10;
 }
 
+/* Per-card auto-delete countdown, shown to the right of the timestamp */
+.card-expiry {
+    margin-left: 10px;
+    white-space: nowrap;
+}
+
+.card-expiry i {
+    margin-right: 3px;
+}
+
 
 .card-content {
     padding: 16px 16px 32px;
@@ -851,7 +1005,6 @@ body.simple-mode .card-header .icon-button:hover {
 /* Theme variables */
 [data-theme="dark"] {
     --text-color: #ffffff;
-    --link-color: #58a6ff;
     --icon-color: #ffffff;
 }
 
