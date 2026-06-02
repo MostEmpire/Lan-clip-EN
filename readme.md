@@ -2,7 +2,7 @@
 # LAN Clipboard
 > LAN sharing tool / clipboard monitoring tool
 
-<img width="2326" height="1642" alt="image" src="https://github.com/user-attachments/assets/c0f2e568-2389-4b16-a6bc-8ee7aa888938" />
+<img width="1330" height="988" alt="image" src=".github/app_look_1_1_0.jpg" />
 
 Quickly share text, images, and files across your local network!
 Highlights
@@ -18,7 +18,7 @@ Highlights
 You'll notice a small panel selection icon in the top-right corner. This is shortcut mode, which you can enable by clicking the button or pressing the Down arrow key in a blank area.
 Once enabled, a card is selected. You can move with the arrow keys, c to copy, Enter to open the link/image, d to download, and Del to delete.
 Batch deletion is very handy. No more aiming the mouse to click buttons.
-<img width="1344" height="873" alt="Shortcut mode" src=".github/shortcut_mode_v1.jpg" />
+<img width="1353" height="908" alt="Shortcut mode" src=".github/shortcut_mode_v3.jpg" />
 
 
 ## Clipboard Monitoring Mode
@@ -68,6 +68,10 @@ python app.py --tray # clipboard monitoring mode
 ```
 
 ## Changelog
+2026-06-02
+- Changed some User Interface things (app is translated to english, scroll to home reorganization, input field split into text, image and files, and some more).
+- Implemented Keep for (autodelete) feature.
+- Implemented live refresh.
 2026-02-28
 - Added a permission management feature; pinning, editing, and deleting posts require a password. (can be changed in pwd.txt)
 2026-02-28 10:24:46
