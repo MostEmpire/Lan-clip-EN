@@ -27,6 +27,57 @@ body {
     font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+/* Modern, theme-aware scrollbar for the whole site.
+   Slim, rounded, translucent thumb on a transparent track; the inner modal
+   scrollbars keep their own (more specific) styles. */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+}
+
+/* Dark theme: light translucent thumb */
+[data-theme="dark"] {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.22);
+    background-clip: padding-box;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+    background-clip: padding-box;
+}
+
+/* Light theme: dark translucent thumb */
+[data-theme="light"] {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.25);
+    background-clip: padding-box;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.42);
+    background-clip: padding-box;
+}
+
 .body {
     padding: 20px;
     font-family: Arial, sans-serif;
@@ -810,24 +861,7 @@ a:hover {
     }
 }
 
-/* Scrollbar styles */
-.modal-body::-webkit-scrollbar {
-    width: 8px;
-}
-
-.modal-body::-webkit-scrollbar-track {
-    background: rgba(var(--text-color-rgb), 0.1);
-    border-radius: 4px;
-}
-
-.modal-body::-webkit-scrollbar-thumb {
-    background: rgba(var(--text-color-rgb), 0.2);
-    border-radius: 4px;
-}
-
-.modal-body::-webkit-scrollbar-thumb:hover {
-    background: rgba(var(--text-color-rgb), 0.3);
-}
+/* Modal scrollbars inherit the global, theme-aware scrollbar styling. */
 
 /* Header style refinements */
 #banner {
@@ -1292,33 +1326,12 @@ a:hover {
     overflow: hidden; /* keep rounded corners while the body scrolls */
 }
 
-/* Let the settings body take the remaining height and scroll when content overflows */
+/* Let the settings body take the remaining height and scroll when content overflows.
+   The scrollbar itself uses the global, theme-aware scrollbar styling. */
 .settings-modal-content .modal-body {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none; /* override the shared 100vh cap */
-    /* Dark scrollbar (Firefox) */
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.28) rgba(0, 0, 0, 0.25);
-}
-
-/* Dark scrollbar (WebKit/Chromium) */
-.settings-modal-content .modal-body::-webkit-scrollbar {
-    width: 8px;
-}
-
-.settings-modal-content .modal-body::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.25);
-    border-radius: 4px;
-}
-
-.settings-modal-content .modal-body::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.28);
-    border-radius: 4px;
-}
-
-.settings-modal-content .modal-body::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.45);
 }
 
 .settings-section {
