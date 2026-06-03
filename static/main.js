@@ -1,15 +1,20 @@
 // Default settings and initialization
 document.documentElement.setAttribute('data-theme', 'dark');
 
-// Toggle fullscreen input
+// Toggle fullscreen editing of the text bubble
 function toggleFullscreenInput() {
-    const container = document.querySelector('.input-container');
+    const container = document.getElementById('seg-text');
     const btn = document.getElementById('fullscreen-btn');
     const icon = btn.querySelector('i');
 
     container.classList.toggle('fullscreen');
+    const isFullscreen = container.classList.contains('fullscreen');
+    // Neutralize the upload panel's backdrop-filter while fullscreen, so the fixed
+    // editor anchors to the viewport (a filtered ancestor would otherwise become
+    // its containing block and the editor would spill off-screen).
+    document.body.classList.toggle('fullscreen-editing', isFullscreen);
 
-    if (container.classList.contains('fullscreen')) {
+    if (isFullscreen) {
         icon.classList.remove('fa-expand');
         icon.classList.add('fa-compress');
         btn.title = "Exit fullscreen";
@@ -23,6 +28,7 @@ function toggleFullscreenInput() {
         btn.title = "Fullscreen edit";
         document.body.style.overflow = '';
     }
+    if (typeof updateInputScrollState === 'function') updateInputScrollState();
 }
 
 const ADMIN_PWD_KEY = 'adminPassword';
@@ -195,6 +201,9 @@ function loadTextFromLocalStorage() {
     const savedText = localStorage.getItem('input-text-content');
     if (savedText) {
         textarea.value = savedText;
+        // Restored text may overflow: re-evaluate the scrollbar state so the
+        // buttons shift even without the user editing the text.
+        updateInputScrollState();
     }
 }
 
@@ -292,8 +301,8 @@ window.onload = function () {
     // Listen for the fullscreen shortcut (Esc exits fullscreen)
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-            const container = document.querySelector('.input-container');
-            // Only respond to Esc when the input box is in fullscreen
+            const container = document.getElementById('seg-text');
+            // Only respond to Esc when the text bubble is in fullscreen
             if (container && container.classList.contains('fullscreen')) {
                 toggleFullscreenInput();
             }
@@ -1371,6 +1380,7 @@ async function addCard() {
     let content = textarea.value;
     content = processInput(content);
     textarea.value = ''; // Clear the input box and sync to localStorage to avoid leftovers
+    updateInputScrollState();
 
     if (!content) return;
 
@@ -2801,8 +2811,22 @@ function initSplitInput() {
         });
     }
 
+    // Track whether the textarea is scrollable, so the overlay buttons shift left
+    // (keeping a small gap to the scrollbar) when one appears.
+    ta.addEventListener('input', updateInputScrollState);
+    window.addEventListener('resize', updateInputScrollState);
+    updateInputScrollState();
+
     // If there's restored draft text on load, start expanded
     if (ta.value.trim()) setActiveSegment('text');
+}
+
+// Toggle a class when the text box has a vertical scrollbar
+function updateInputScrollState() {
+    const ta = document.getElementById('input-text');
+    const seg = document.getElementById('seg-text');
+    if (!ta || !seg) return;
+    seg.classList.toggle('has-scrollbar', ta.scrollHeight > ta.clientHeight + 1);
 }
 
 document.addEventListener('DOMContentLoaded', initSplitInput);
