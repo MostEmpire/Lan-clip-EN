@@ -161,6 +161,7 @@ body {
     gap: 10px;
     min-width: 0;
     padding: 14px 16px;
+    position: relative;
     background: var(--input-bg);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -173,16 +174,58 @@ body {
     flex: 1;
     min-height: 0;
     width: 100%;
+    /* "Solid but visually transparent" mask: knock the text out of the buttons'
+       bottom-right corner so the bubble shows through (no text under the buttons).
+       The knockout is rounded on the left (around the fullscreen button) and
+       straight on the right (flush with the Send button's edge). */
+    -webkit-mask:
+        linear-gradient(#000 0 0),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='111' height='54'%3E%3Cpath d='M27 0 H109 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 109px 54px no-repeat;
+    -webkit-mask-composite: xor;
+    mask:
+        linear-gradient(#000 0 0),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='111' height='54'%3E%3Cpath d='M27 0 H109 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 109px 54px no-repeat;
+    mask-composite: exclude;
+    transition: -webkit-mask-position 0.2s ease, mask-position 0.2s ease;
+}
+
+/* Active (or fullscreen) state: the fullscreen button is visible too, so the mask
+   widens to span both buttons (the original, wider knockout). */
+.input-container.active-text .seg-text textarea,
+.seg-text.fullscreen textarea {
+    -webkit-mask:
+        linear-gradient(#000 0 0),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='165' height='54'%3E%3Cpath d='M27 0 H163 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 163px 54px no-repeat;
+    -webkit-mask-composite: xor;
+    mask:
+        linear-gradient(#000 0 0),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='165' height='54'%3E%3Cpath d='M27 0 H163 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 163px 54px no-repeat;
+    mask-composite: exclude;
 }
 
 /* Bottom row of the text bubble: auto-delete control + Send, packed to the right
    (so the control expands leftward) with a 12px gap between them */
 .seg-text-controls {
+    position: absolute;
+    bottom: 14px;
+    right: 16px;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 12px;
+    gap: 10px;
     flex-wrap: nowrap;
+    transition: right 0.2s ease;
+}
+
+/* When the textarea is scrollable, slide the buttons left past the scrollbar
+   (~10px) leaving a 5px gap between Send and the scrollbar */
+.seg-text.has-scrollbar:not(.fullscreen) .seg-text-controls {
+    right: 39px;
+}
+
+/* The knockout follows the buttons left when the scrollbar appears */
+.seg-text.has-scrollbar:not(.fullscreen) textarea {
+    -webkit-mask-position: 0 0, right 22px bottom 0;
+    mask-position: 0 0, right 22px bottom 0;
 }
 
 .seg-text #add-btn {
@@ -1950,10 +1993,10 @@ input:checked+.slider:before {
     display: none;
 }
 
-/* Controls stay pinned at the bottom in fullscreen */
+/* Controls overlay the bottom-right corner in fullscreen too */
 .seg-text.fullscreen .seg-text-controls {
-    margin-top: auto;
-    background: transparent;
+    bottom: 24px;
+    right: 20px;
 }
 
 /* Fullscreen toggle: only shown while the text bubble is expanded/active (or in fullscreen) */
