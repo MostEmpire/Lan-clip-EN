@@ -1,15 +1,20 @@
 // Default settings and initialization
 document.documentElement.setAttribute('data-theme', 'dark');
 
-// Toggle fullscreen input
+// Toggle fullscreen editing of the text bubble
 function toggleFullscreenInput() {
-    const container = document.querySelector('.input-container');
+    const container = document.getElementById('seg-text');
     const btn = document.getElementById('fullscreen-btn');
     const icon = btn.querySelector('i');
 
     container.classList.toggle('fullscreen');
+    const isFullscreen = container.classList.contains('fullscreen');
+    // Neutralize the upload panel's backdrop-filter while fullscreen, so the fixed
+    // editor anchors to the viewport (a filtered ancestor would otherwise become
+    // its containing block and the editor would spill off-screen).
+    document.body.classList.toggle('fullscreen-editing', isFullscreen);
 
-    if (container.classList.contains('fullscreen')) {
+    if (isFullscreen) {
         icon.classList.remove('fa-expand');
         icon.classList.add('fa-compress');
         btn.title = "Exit fullscreen";
@@ -292,8 +297,8 @@ window.onload = function () {
     // Listen for the fullscreen shortcut (Esc exits fullscreen)
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-            const container = document.querySelector('.input-container');
-            // Only respond to Esc when the input box is in fullscreen
+            const container = document.getElementById('seg-text');
+            // Only respond to Esc when the text bubble is in fullscreen
             if (container && container.classList.contains('fullscreen')) {
                 toggleFullscreenInput();
             }

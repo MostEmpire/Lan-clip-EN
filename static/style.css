@@ -16,7 +16,7 @@
     --txtbg-color: rgba(30, 32, 34, 0.85);
     --link-color: #9FCFFF;
     --header-bg: rgba(26, 28, 30, 0.7);
-    --input-bg: rgba(30, 32, 34, 0.7);
+    --input-bg: rgba(30, 32, 34, 0.8);
     --input-border: rgba(255, 255, 255, 0.1);
 }
 
@@ -322,7 +322,7 @@ body {
     padding: 12px;
     border: 2px dashed #d3d3d3;
     border-radius: 20px;
-	background: linear-gradient(rgba(128, 128, 128, 0.32), rgba(128, 128, 128, 0.80)), var(--input-bg);
+	background: linear-gradient(rgba(60, 60, 60, 0.7), rgba(128, 128, 128, 0.3));
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -347,7 +347,7 @@ body {
 
 .seg-upload:hover {
     border-color: #ebebeb;
-    background-color: rgba(128, 128, 128, 0.08);
+    background-color: rgba(200, 200, 200, 0.18);
 }
 
 .seg-upload:hover i,
@@ -1910,54 +1910,72 @@ input:checked+.slider:before {
 }
 
 /* Fullscreen input mode */
-.input-container.fullscreen {
+/* Fullscreen text editor: the text bubble fills the whole screen */
+.seg-text.fullscreen {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     z-index: 99999;
-    /* Ensure it's on top of everything including modals if needed */
+    border: none;
     border-radius: 0;
+    box-shadow: none;
     margin: 0;
     padding: 20px;
     box-sizing: border-box;
     background: var(--bg-color);
-    /* Use theme background */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     display: flex;
     flex-direction: column;
+    gap: 10px;
 }
 
-/* Ensure the textarea takes remaining height */
-.input-container.fullscreen textarea {
+/* Textarea takes the remaining height */
+.seg-text.fullscreen textarea {
     flex: 1;
     height: 100%;
     resize: none;
     font-size: 18px;
     line-height: 1.6;
     padding: 10px;
-    margin-bottom: 10px;
-}
-
-/* Hide the textarea scrollbar in fullscreen mode but still allow scrolling */
-.input-container.fullscreen textarea::-webkit-scrollbar {
-    display: none;
-}
-
-.input-container.fullscreen textarea {
     -ms-overflow-style: none;
     /* IE and Edge */
     scrollbar-width: none;
     /* Firefox */
 }
 
-/* In fullscreen, make the button group stick to bottom if desired, or just normal flow */
-.input-container.fullscreen .button-group {
+.seg-text.fullscreen textarea::-webkit-scrollbar {
+    display: none;
+}
+
+/* Controls stay pinned at the bottom in fullscreen */
+.seg-text.fullscreen .seg-text-controls {
     margin-top: auto;
-    /* Push to bottom if container is flex column */
     background: transparent;
+}
+
+/* Fullscreen toggle: only shown while the text bubble is expanded/active (or in fullscreen) */
+#fullscreen-btn {
+    display: none;
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+#fullscreen-btn:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.input-container.active-text #fullscreen-btn,
+.seg-text.fullscreen #fullscreen-btn {
+    display: flex;
+}
+
+/* While editing fullscreen, drop the panel's backdrop-filter so the fixed editor
+   anchors to the viewport (a filtered ancestor would otherwise be its containing block) */
+body.fullscreen-editing .upload-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 /* Grid Mode Layout */
