@@ -1,10 +1,12 @@
-
 # LAN Clipboard
-> LAN sharing tool / clipboard monitoring tool
+This software solves the following main problems:
+- Easily share images across devices on the local network
+- Easily share big files across devices on the local network
+- Easily share text across devices. Paste on one device, copy on another
+- Share image snippets with automatic configurable image compression
 
-<img width="1330" height="988" alt="image" src=".github/app_look_1_1_0.jpg" />
+<img width="1257" height="902" alt="image" src=".github/app_look_1_1_1.jpg" />
 
-Quickly share text, images, and files across your local network!
 Highlights
 - Supports text / image / file storage
 - Automatically detects and converts URLs into hyperlinks
@@ -28,7 +30,7 @@ Once enabled, a small green lizard appears in the tray. Right-click to start mon
 - Mac users can ask an AI how to write a hidden launch command. Write your own and add it to your .zshrc file. For example: `alias lanclip="cd /Users/kasusa/Documents/GitHub/Lan-clip; nohup python3 app.py --tray > /dev/null 2>&1 &"`
 - Linux users may need to modify tray_manager.py and run from the Python source code, since I've only tested the Windows and Mac versions.
 
-<img width="210" height="214" alt="image" src="https://github.com/user-attachments/assets/5a0cb5d6-3ec6-4b1e-bad2-ca3cbf819159" />
+<img width="630" height="237" alt="image" src=".github/traymode_v1.jpg" />
 
 
 
@@ -68,12 +70,18 @@ python app.py --tray # clipboard monitoring mode
 ```
 
 ## Changelog
+2026-06-15
+- Implemented better use of the space in the text input bubble.
+- Added Paste-from-clipboard feature.
+
 2026-06-02
 - Changed some User Interface things (app is translated to english, scroll to home reorganization, input field split into text, image and files, and some more).
-- Implemented Keep for (autodelete) feature.
+- Implemented Keep for a time (autodelete) feature.
 - Implemented live refresh.
+
 2026-02-28
 - Added a permission management feature; pinning, editing, and deleting posts require a password. (can be changed in pwd.txt)
+
 2026-02-28 10:24:46
 - Added download and delete buttons to each image in the gallery preview
 - Added a "Settings → Compact mode" toggle to switch between experiences: normal mode keeps animations and large image previews, while compact mode is flatter, scrolls faster, and makes action buttons more prominent.
@@ -81,7 +89,8 @@ python app.py --tray # clipboard monitoring mode
 - Added password setting via pwd.txt
 - Delete animation
 - Double-click a card to enter highlight-card mode; use the arrow keys to move the selection, del/backspace to delete (after deleting, the next card is selected automatically), d to download, e to edit, c to copy (these only work while a card is highlighted)
-- 2026-01-17
+
+2026-01-17
 - Allow pinning cards
 - No longer freezes the background when refreshing
 - Added docker -v volume mounting for persistence
