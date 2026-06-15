@@ -2807,7 +2807,14 @@ function initSplitInput() {
             if (suppressContract) return;
             const next = e.relatedTarget;
             if (next && segText.contains(next)) return; // focus stayed inside the bubble
-            if (!ta.value.trim()) setActiveSegment(null);
+            // Defer so a same-gesture click (e.g. the fullscreen toggle, which re-focuses
+            // the textarea) can run first. On touch the focusout arrives before that click
+            // — unlike on desktop — so re-check the live state before contracting.
+            setTimeout(() => {
+                if (segText.classList.contains('fullscreen')) return;
+                if (segText.contains(document.activeElement)) return;
+                if (!ta.value.trim()) setActiveSegment(null);
+            }, 0);
         });
     }
 
