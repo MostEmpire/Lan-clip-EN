@@ -190,7 +190,7 @@ body {
     border-radius: 29px;
     position: absolute;
     bottom: 9px;
-    right: 21px;
+    right: 9px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1998,16 +1998,13 @@ input:checked+.slider:before {
 /* Fullscreen toggle: only shown while the text bubble is expanded/active (or in fullscreen) */
 #fullscreen-btn {
     display: none;
-    background-color: #818181;
 }
 
-/* Paste button stays visible even when the bubble is contracted (left of Send) */
-#paste-btn {
-    background-color: #818181;
+.action-btn{
+	background-color: #818181;
 }
 
-#fullscreen-btn:hover,
-#paste-btn:hover {
+.action-btn:hover {
     background-color: #A0A0A0;
 }
 
