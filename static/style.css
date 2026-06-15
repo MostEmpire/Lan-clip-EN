@@ -163,69 +163,50 @@ body {
     padding: 14px 16px;
     position: relative;
     background: var(--input-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--input-border);
     border-radius: 20px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+@media (min-width: 768px) {
+    .seg-text {
+		backdrop-filter: blur(20px);
+		-webkit-backdrop-filter: blur(20px);
+    }
 }
 
 .seg-text textarea {
     flex: 1;
     min-height: 0;
     width: 100%;
-    /* "Solid but visually transparent" mask: knock the text out of the buttons'
-       bottom-right corner so the bubble shows through (no text under the buttons).
-       The knockout is rounded on the left (around the fullscreen button) and
-       straight on the right (flush with the Send button's edge). */
-    -webkit-mask:
-        linear-gradient(#000 0 0),
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='111' height='54'%3E%3Cpath d='M27 0 H109 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 109px 54px no-repeat;
-    -webkit-mask-composite: xor;
-    mask:
-        linear-gradient(#000 0 0),
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='111' height='54'%3E%3Cpath d='M27 0 H109 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 109px 54px no-repeat;
-    mask-composite: exclude;
-    transition: -webkit-mask-position 0.2s ease, mask-position 0.2s ease;
+    transition: min-height 0.25s ease;
 }
 
-/* Active (or fullscreen) state: the fullscreen button is visible too, so the mask
-   widens to span both buttons (the original, wider knockout). */
-.input-container.active-text .seg-text textarea,
-.seg-text.fullscreen textarea {
-    -webkit-mask:
-        linear-gradient(#000 0 0),
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='165' height='54'%3E%3Cpath d='M27 0 H163 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 163px 54px no-repeat;
-    -webkit-mask-composite: xor;
-    mask:
-        linear-gradient(#000 0 0),
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='165' height='54'%3E%3Cpath d='M27 0 H163 V54 H0 V27 A27 27 0 0 1 27 0 Z' fill='%23000'/%3E%3C/svg%3E") right bottom / 163px 54px no-repeat;
-    mask-composite: exclude;
-}
-
-/* Bottom row of the text bubble: auto-delete control + Send, packed to the right
-   (so the control expands leftward) with a 12px gap between them */
+/* Bottom row of the text bubble: fullscreen + Send buttons, packed to the right */
 .seg-text-controls {
+	padding: 5px;
+	background: #3A3A3A;
+	box-shadow: 0px 0px 5px #303030;
+    border-radius: 29px;
     position: absolute;
-    bottom: 14px;
-    right: 16px;
+    bottom: 9px;
+    right: 21px;
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: nowrap;
-    transition: right 0.2s ease;
+    transition: right 0.2s ease, background-color 0.2s ease;
 }
 
-/* When the textarea is scrollable, slide the buttons left past the scrollbar
-   (~10px) leaving a 5px gap between Send and the scrollbar */
+/* When the textarea has a vertical scrollbar, shift the button pill left to clear it */
 .seg-text.has-scrollbar:not(.fullscreen) .seg-text-controls {
-    right: 39px;
+    right: 34px;
 }
 
-/* The knockout follows the buttons left when the scrollbar appears */
-.seg-text.has-scrollbar:not(.fullscreen) textarea {
-    -webkit-mask-position: 0 0, right 22px bottom 0;
-    mask-position: 0 0, right 22px bottom 0;
+/* While the text bubble is focused (being edited), darken the pill to match the
+   active input. Reverts to the base colour as soon as focus leaves the bubble. */
+.seg-text:focus-within .seg-text-controls {
+    background: #313131;
 }
 
 .seg-text #add-btn {
@@ -366,14 +347,19 @@ body {
     border: 2px dashed #d3d3d3;
     border-radius: 20px;
 	background: linear-gradient(rgba(60, 60, 60, 0.7), rgba(128, 128, 128, 0.3));
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     color: var(--text-color);
     cursor: pointer;
     text-align: center;
     font-size: 13px;
     min-width: 0;
+}
+
+@media (min-width: 768px) {
+    .seg-upload {
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+    }
 }
 
 .seg-upload i {
@@ -467,7 +453,17 @@ body {
     }
 
     .seg-text textarea {
-        min-height: 70px;
+        min-height: 90px;
+    }
+
+    /* While typing in the text bubble, hide the two upload bubbles and let the
+       text bubble grow vertically into the freed space. */
+    .input-container.active-text .seg-upload {
+        display: none !important;
+    }
+
+    .input-container.active-text .seg-text textarea {
+        min-height: 260px;
     }
 
     .input-sep {
@@ -2002,11 +1998,11 @@ input:checked+.slider:before {
 /* Fullscreen toggle: only shown while the text bubble is expanded/active (or in fullscreen) */
 #fullscreen-btn {
     display: none;
-    background-color: rgba(255, 255, 255, 0.12);
+    background-color: #818181;
 }
 
 #fullscreen-btn:hover {
-    background-color: rgba(255, 255, 255, 0.2);
+    background-color: #A0A0A0;
 }
 
 .input-container.active-text #fullscreen-btn,
