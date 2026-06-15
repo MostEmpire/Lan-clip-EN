@@ -926,7 +926,7 @@ body.simple-mode .card-header .icon-button:hover {
 
 .raw-button {
     padding: 6px 10px !important;
-    border-radius: 6px !important;
+    border-radius: 6px 6px 12px 6px !important;
     background: rgba(var(--text-color-rgb), 0.1) !important;
     border: none !important;
     color: var(--text-color) !important;
