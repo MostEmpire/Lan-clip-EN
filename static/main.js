@@ -641,6 +641,30 @@ function pasteClipboard() {
     }
 }
 
+// Paste button inside the text bubble: insert clipboard text into the textarea
+// (at the caret/selection) instead of submitting it.
+function pasteIntoTextInput() {
+    const ta = document.getElementById('input-text');
+    if (!ta) return;
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+        alert('Direct paste is not available on HTTP sites');
+        return;
+    }
+    navigator.clipboard.readText()
+        .then(text => {
+            if (!text) return;
+            const start = ta.selectionStart ?? ta.value.length;
+            const end = ta.selectionEnd ?? ta.value.length;
+            ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+            const caret = start + text.length;
+            ta.focus();
+            ta.setSelectionRange(caret, caret);
+            setActiveSegment('text');
+            if (typeof updateScrollbarState === 'function') updateScrollbarState();
+        })
+        .catch(() => alert('Direct paste is not available on HTTP sites'));
+}
+
 // Ctrl+Enter to submit
 document.getElementById('input-text').addEventListener('keydown', function (e) {
     console.log(e.key)

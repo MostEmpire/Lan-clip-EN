@@ -2001,7 +2001,13 @@ input:checked+.slider:before {
     background-color: #818181;
 }
 
-#fullscreen-btn:hover {
+/* Paste button stays visible even when the bubble is contracted (left of Send) */
+#paste-btn {
+    background-color: #818181;
+}
+
+#fullscreen-btn:hover,
+#paste-btn:hover {
     background-color: #A0A0A0;
 }
 
