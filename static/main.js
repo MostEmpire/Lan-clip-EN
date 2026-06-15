@@ -28,7 +28,6 @@ function toggleFullscreenInput() {
         btn.title = "Fullscreen edit";
         document.body.style.overflow = '';
     }
-    if (typeof updateInputScrollState === 'function') updateInputScrollState();
 }
 
 const ADMIN_PWD_KEY = 'adminPassword';
@@ -201,9 +200,8 @@ function loadTextFromLocalStorage() {
     const savedText = localStorage.getItem('input-text-content');
     if (savedText) {
         textarea.value = savedText;
-        // Restored text may overflow: re-evaluate the scrollbar state so the
-        // buttons shift even without the user editing the text.
-        updateInputScrollState();
+        // Restored text may overflow — update the scrollbar shift without an edit.
+        if (typeof updateScrollbarState === 'function') updateScrollbarState();
     }
 }
 
@@ -1380,7 +1378,7 @@ async function addCard() {
     let content = textarea.value;
     content = processInput(content);
     textarea.value = ''; // Clear the input box and sync to localStorage to avoid leftovers
-    updateInputScrollState();
+    if (typeof updateScrollbarState === 'function') updateScrollbarState();
 
     if (!content) return;
 
@@ -2811,18 +2809,18 @@ function initSplitInput() {
         });
     }
 
-    // Track whether the textarea is scrollable, so the overlay buttons shift left
-    // (keeping a small gap to the scrollbar) when one appears.
-    ta.addEventListener('input', updateInputScrollState);
-    window.addEventListener('resize', updateInputScrollState);
-    updateInputScrollState();
+    // Shift the button pill left when the textarea grows a vertical scrollbar.
+    ta.addEventListener('input', updateScrollbarState);
+    window.addEventListener('resize', updateScrollbarState);
+    updateScrollbarState();
 
     // If there's restored draft text on load, start expanded
     if (ta.value.trim()) setActiveSegment('text');
 }
 
-// Toggle a class when the text box has a vertical scrollbar
-function updateInputScrollState() {
+// Toggle a class on the text bubble when its textarea has a vertical scrollbar, so
+// CSS can shift the overlay button pill left to clear it.
+function updateScrollbarState() {
     const ta = document.getElementById('input-text');
     const seg = document.getElementById('seg-text');
     if (!ta || !seg) return;
