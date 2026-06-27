@@ -13,6 +13,7 @@ import argparse
 import time
 import auth_service
 import json
+import random
 import net_utils
 if sys.platform == 'darwin':
     import tray_manager_mac as tray_manager
@@ -669,6 +670,186 @@ def import_content():
 def get_revision():
     # Lightweight endpoint clients poll to detect changes (live refresh)
     return jsonify({'rev': data_revision})
+
+# --- Server-side background management ---
+BG_CONFIG_FILE = 'bg_config.json'
+BG_ALLOWED_EXTS = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
+DEFAULT_BG_INTERVAL_MS = 180000   # 3 min
+MIN_BG_INTERVAL_MS = 30000        # 30 s
+MAX_BG_INTERVAL_MS = 300000       # 5 min
+
+# The image served to newly connected clients in "session" mode. In-memory only:
+# it is auto-seeded with a random image at startup (see below) so a fresh one is
+# picked on each restart; an admin can override it via "mark session".
+session_background = None
+_bg_lock = threading.Lock()
+
+def _bg_dir():
+    d = os.path.join(app.static_folder, 'backgrounds')
+    if not os.path.exists(d):
+        os.makedirs(d)
+    return d
+
+def _bg_safe_name(name):
+    """Return a safe basename for a backgrounds file (defends against path traversal),
+    or None if the name is empty or not an allowed image type."""
+    if not name:
+        return None
+    base = secure_filename(os.path.basename(str(name).replace('\\', '/')))
+    if not base or not base.lower().endswith(BG_ALLOWED_EXTS):
+        return None
+    return base
+
+def _bg_url(name):
+    return '/static/backgrounds/' + name
+
+def list_background_files():
+    d = _bg_dir()
+    files = []
+    if os.path.isdir(d):
+        for name in sorted(os.listdir(d)):
+            if name.lower().endswith(BG_ALLOWED_EXTS):
+                files.append(name)
+    return files
+
+def load_bg_config():
+    cfg = {'mode': 'random', 'interval_ms': DEFAULT_BG_INTERVAL_MS}
+    try:
+        if os.path.exists(BG_CONFIG_FILE):
+            with open(BG_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if data.get('mode') in ('random', 'session'):
+                    cfg['mode'] = data['mode']
+                iv = int(data.get('interval_ms', DEFAULT_BG_INTERVAL_MS))
+                cfg['interval_ms'] = max(MIN_BG_INTERVAL_MS, min(MAX_BG_INTERVAL_MS, iv))
+    except Exception as e:
+        print(f"Error loading bg config: {str(e)}")
+    return cfg
+
+def save_bg_config(cfg):
+    try:
+        with open(BG_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f)
+    except Exception as e:
+        print(f"Error saving bg config: {str(e)}")
+
+def _pick_random_session():
+    """Return a random available background filename, or None if there are none."""
+    files = list_background_files()
+    return random.choice(files) if files else None
+
+# Seed the session image at startup so "session" mode has a shared background
+# immediately (in-memory, so a fresh random one is picked on every restart).
+session_background = _pick_random_session()
+
+@app.route('/api/backgrounds', methods=['GET'])
+def list_backgrounds():
+    # Public: returns the available server images plus the current connect-mode,
+    # rotation interval, the marked session image, and whether the caller is admin.
+    global session_background
+    files = list_background_files()
+    cfg = load_bg_config()
+    sess = session_background
+    if sess and sess not in files:  # marked image was deleted/missing
+        sess = None
+    return jsonify({
+        'images': [_bg_url(f) for f in files],
+        'session': _bg_url(sess) if sess else None,
+        'mode': cfg['mode'],
+        'interval_ms': cfg['interval_ms'],
+        'is_admin': is_authenticated(),
+    })
+
+@app.route('/api/backgrounds/upload', methods=['POST'])
+def upload_background():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Administrator password required'}), 401
+    files = request.files.getlist('file') or request.files.getlist('image')
+    saved = []
+    for f in files:
+        if not f or not f.filename:
+            continue
+        name = _bg_safe_name(f.filename)
+        if not name:
+            continue
+        base, ext = os.path.splitext(name)
+        dest = os.path.join(_bg_dir(), name)
+        i = 1
+        while os.path.exists(dest):  # don't overwrite an existing image
+            name = f"{base}_{i}{ext}"
+            dest = os.path.join(_bg_dir(), name)
+            i += 1
+        f.save(dest)
+        saved.append(name)
+        log_action("BG_UPLOAD", f"Filename: {name}")
+    bump_revision()
+    return jsonify({'status': 'success',
+                    'saved': [_bg_url(n) for n in saved],
+                    'images': [_bg_url(f) for f in list_background_files()]})
+
+@app.route('/api/backgrounds/delete', methods=['POST'])
+def delete_background():
+    global session_background
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Administrator password required'}), 401
+    data = request.get_json(silent=True) or {}
+    name = _bg_safe_name(data.get('filename') or data.get('url') or '')
+    if not name:
+        return jsonify({'status': 'error', 'message': 'Invalid filename'}), 400
+    path = os.path.join(_bg_dir(), name)
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+    with _bg_lock:
+        if session_background == name:  # deleting the session image re-picks from the rest
+            session_background = _pick_random_session()
+    log_action("BG_DELETE", f"Filename: {name}")
+    bump_revision()
+    return jsonify({'status': 'success', 'images': [_bg_url(f) for f in list_background_files()]})
+
+@app.route('/api/backgrounds/session', methods=['POST'])
+def set_session_background():
+    global session_background
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Administrator password required'}), 401
+    data = request.get_json(silent=True) or {}
+    raw = data.get('filename') or data.get('url') or ''
+    if raw in (None, '', 'null'):  # clear the session image
+        with _bg_lock:
+            session_background = None
+        bump_revision()
+        return jsonify({'status': 'success', 'session': None})
+    name = _bg_safe_name(raw)
+    if not name or name not in list_background_files():
+        return jsonify({'status': 'error', 'message': 'Image not found'}), 400
+    with _bg_lock:
+        session_background = name
+    log_action("BG_SESSION", f"Filename: {name}")
+    bump_revision()
+    return jsonify({'status': 'success', 'session': _bg_url(name)})
+
+@app.route('/api/backgrounds/config', methods=['POST'])
+def set_background_config():
+    # Admin-only: persists the connect-mode and rotation interval as the global
+    # default for all clients (survives restart; the session image does not).
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Administrator password required'}), 401
+    data = request.get_json(silent=True) or {}
+    cfg = load_bg_config()
+    if data.get('mode') in ('random', 'session'):
+        cfg['mode'] = data['mode']
+    if 'interval_ms' in data:
+        try:
+            iv = int(data.get('interval_ms'))
+            cfg['interval_ms'] = max(MIN_BG_INTERVAL_MS, min(MAX_BG_INTERVAL_MS, iv))
+        except (TypeError, ValueError):
+            pass
+    save_bg_config(cfg)
+    log_action("BG_CONFIG", f"mode={cfg['mode']} interval_ms={cfg['interval_ms']}")
+    bump_revision()
+    return jsonify({'status': 'success', **cfg})
 
 def _auto_delete_worker():
     # Periodically remove expired cards so they disappear even without page activity;

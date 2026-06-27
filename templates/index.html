@@ -134,6 +134,8 @@
         </button>
 
         <div id="background"></div>
+        <!-- Top layer used to cross-fade to the next rotating background -->
+        <div id="background-fade"></div>
         <!-- Drop zone -->
         <div id="drop-zone"
             style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999;">
@@ -383,27 +385,6 @@
                             <span class="setting-label">Permission control (password required to pin/edit/delete)</span>
                         </div>
 
-                        <div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 10px;">
-                            <span class="setting-label">Custom background image folder</span>
-                            <div id="bg-preview-container"
-                                style="width: 100%; height: 120px; border-radius: 8px; overflow: hidden; margin-bottom: 5px; border: 1px solid rgba(255,255,255,0.1); display: none;">
-                                <img id="bg-preview-img" style="width: 100%; height: 100%; object-fit: cover;">
-                            </div>
-                            <div style="display: flex; gap: 10px; width: 100%;">
-                                <button onclick="selectBackgroundFolder()" class="btn-block" style="flex: 1;">
-                                    <i class="fas fa-folder-open"></i> Choose folder
-                                </button>
-                                <button onclick="nextBackground()" class="btn-block" style="width: 50px;" title="Next">
-                                    <i class="fas fa-step-forward"></i>
-                                </button>
-                                <button onclick="clearBackgroundFolder()" class="btn-block danger" style="width: 50px;"
-                                    title="Clear / restore default">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                            <span id="bg-folder-info" style="font-size: 12px; opacity: 0.6;">(No custom folder selected)</span>
-                        </div>
-
                         <div class="setting-item">
                             <label class="switch">
                                 <input type="checkbox" id="clear-history-toggle" onchange="clearHistory()">
@@ -428,6 +409,45 @@
                             <input type="range" id="compression-quality-slider" min="1" max="100" value="80"
                                 style="width: 100%;" oninput="updateCompressionQuality(this.value)">
                         </div>
+                    </div>
+
+                    <div class="settings-section" id="bg-settings-section">
+                        <h4>Backgrounds</h4>
+
+                        <!-- Admin-only management grid; thumbnails are injected by JS and the
+                             grid itself doubles as a drag-and-drop upload target. -->
+                        <div id="bg-admin-area" style="display: none;">
+                            <div id="bg-grid" class="bg-grid"
+                                ondragover="bgGridDragOver(event)" ondragleave="bgGridDragLeave(event)"
+                                ondrop="bgGridDrop(event)"></div>
+                            <span class="bg-drop-hint">Drag &amp; drop an image here to add it to the server</span>
+                        </div>
+
+                        <!-- Shown to non-admins: unlock the management grid with the admin password. -->
+                        <div id="bg-admin-unlock" style="display: none; margin-bottom: 6px;">
+                            <button onclick="unlockBackgroundAdmin()" class="btn-block secondary">
+                                <i class="fas fa-lock"></i> Enter admin password to manage backgrounds
+                            </button>
+                        </div>
+
+                        <!-- Connect-mode switch (visible to everyone). -->
+                        <div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                            <span class="setting-label">When a client connects, show background:</span>
+                            <div class="bg-mode-switch">
+                                <button id="bg-mode-random" class="bg-mode-btn" onclick="setBgMode('random')">Random</button>
+                                <button id="bg-mode-session" class="bg-mode-btn" onclick="setBgMode('session')">Session</button>
+                            </div>
+                        </div>
+
+                        <!-- Transition interval slider (visible to everyone). -->
+                        <div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                            <span class="setting-label">Transition interval: <span id="bg-interval-value">3m 0s</span></span>
+                            <input type="range" id="bg-interval-slider" min="30" max="300" step="5" value="180"
+                                style="width: 100%;" oninput="onBgIntervalInput(this.value)"
+                                onchange="onBgIntervalCommit(this.value)">
+                        </div>
+
+                        <span id="bg-admin-note" style="font-size: 12px; opacity: 0.6;"></span>
                     </div>
 
                     <div class="settings-section">

@@ -90,7 +90,8 @@ body {
 
 /* Add some background */
 
-#background {
+#background,
+#background-fade {
     position: fixed;
     top: 0;
     left: 0;
@@ -104,6 +105,12 @@ body {
     background-size: cover;
     background-repeat: no-repeat;
     z-index: -1;
+}
+
+/* Cross-fade layer: sits above #background, hidden until a rotation fades it in */
+#background-fade {
+    opacity: 0;
+    transition: opacity 2s ease;
 }
 
 
@@ -331,7 +338,6 @@ body {
 @media (max-width: 768px) {
     .seg-text-controls {
         margin-left: -12px;
-        margin-right: -12px;
     }
 }
 
@@ -2157,4 +2163,107 @@ body.highlight-mode-active .card-wrapper {
 
 #get-old-cards-btn:hover i {
     transform: rotate(-30deg);
+}
+
+/* ===================== Backgrounds management (settings) ===================== */
+.bg-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 90px;
+    padding: 6px;
+    border-radius: 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.04);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.bg-grid.bg-drag-over {
+    border-color: #007aff;
+    background: rgba(0, 122, 255, 0.12);
+}
+
+.bg-tile {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    overflow: hidden;
+    background-size: cover;
+    background-position: center;
+    border: 2px solid transparent;
+}
+
+/* Yellow border marks the current session image */
+.bg-tile.is-session {
+    border-color: #ffd60a;
+    box-shadow: 0 0 0 1px #ffd60a, 0 0 8px rgba(255, 214, 10, 0.55);
+}
+
+/* Diagonal split halves, revealed on hover. clip-path also limits the clickable
+   area to each triangle, so top-left = mark, bottom-right = delete. */
+.bg-tile-half {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    color: #fff;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.bg-tile:hover .bg-tile-half {
+    opacity: 1;
+}
+
+.bg-tile-mark {
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+    background: rgba(0, 122, 255, 0.55);
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 5px;
+    cursor: pointer;
+}
+
+.bg-tile-del {
+    clip-path: polygon(100% 0, 100% 100%, 0 100%);
+    background: rgba(255, 59, 48, 0.55);
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: 5px;
+    cursor: pointer;
+}
+
+.bg-tile-mark:hover { background: rgba(0, 122, 255, 0.85); }
+.bg-tile-del:hover { background: rgba(255, 59, 48, 0.85); }
+.bg-tile-half i { font-size: 14px; pointer-events: none; }
+
+.bg-drop-hint {
+    display: block;
+    font-size: 11px;
+    opacity: 0.5;
+    margin: 4px 0 10px;
+    text-align: center;
+}
+
+/* Random / Session connect-mode switch */
+.bg-mode-switch {
+    display: inline-flex;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.bg-mode-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    border: none;
+    padding: 6px 16px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.bg-mode-btn.active {
+    background: #007aff;
+    color: #fff;
 }

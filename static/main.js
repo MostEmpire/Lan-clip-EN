@@ -1471,95 +1471,134 @@ async function addCard() {
 }
 
 
-// Define a list of remote image links
-const imageUrls = [
-    // 'static/bg.jpg',
-    // 'static/2.jpg',
-    'static/39.jpg',
-    'static/16.jpg',
-    'static/5.jpg'
-    // Add more image links
+// ====================== Server-side background system ======================
+// Backgrounds live on the server under static/backgrounds/. Clients fetch the
+// list + connect-mode + rotation interval from /api/backgrounds, pick an initial
+// image (the session image or a random one per the mode), then cross-fade through
+// all server images at the configured interval. Admins manage the images and can
+// save the mode/interval as the global default; non-admins can still adjust them
+// locally (their changes don't affect other clients).
+
+const DEFAULT_BG_INTERVAL_MS = 180000; // 3 min, matches the server default
+const MIN_BG_INTERVAL_MS = 30000;      // 30 s
+const MAX_BG_INTERVAL_MS = 300000;     // 5 min
+
+// Used only if the server can't be reached on first paint.
+const FALLBACK_BG_IMAGES = [
+    '/static/backgrounds/39.jpg',
+    '/static/backgrounds/16.jpg',
+    '/static/backgrounds/5.jpg'
 ];
 
-// Define a function to get a random background image ("image of the day" based on date and manual offset)
-async function getRandomBackgroundImage() {
-    const isCustom = localStorage.getItem('hasCustomBG') === 'true';
-    if (!isCustom) {
-        const now = new Date();
-        const dateStr = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-        let dateSeed = 0;
-        for (let i = 0; i < dateStr.length; i++) dateSeed += dateStr.charCodeAt(i);
-        const manualOffset = parseInt(localStorage.getItem('bgManualOffset')) || 0;
-        const index = Math.abs(dateSeed + manualOffset) % imageUrls.length;
-        return imageUrls[index];
-    }
+const bgState = {
+    images: FALLBACK_BG_IMAGES.slice(),
+    session: null,                       // url of the marked session image, or null
+    mode: 'random',                      // server default connect-mode
+    interval_ms: DEFAULT_BG_INTERVAL_MS,
+    isAdmin: false,
+    rotateTimer: null
+};
 
+// A client may override mode/interval locally without affecting other clients.
+function effectiveBgMode() {
+    const m = localStorage.getItem('bgMode');
+    return (m === 'random' || m === 'session') ? m : bgState.mode;
+}
+function effectiveBgIntervalMs() {
+    const v = parseInt(localStorage.getItem('bgIntervalMs'));
+    if (!isNaN(v)) return Math.max(MIN_BG_INTERVAL_MS, Math.min(MAX_BG_INTERVAL_MS, v));
+    return bgState.interval_ms;
+}
+
+// Fetch server background config. Auth headers let the server report if we're admin.
+async function fetchBackgroundConfig() {
     try {
-        const db = await openBGDB();
-
-        // Compute the identifier for the current environment (date + offset)
-        const now = new Date();
-        const dateKey = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-        const manualOffset = parseInt(localStorage.getItem('bgManualOffset')) || 0;
-        const currentEnvKey = `${dateKey}_${manualOffset}`;
-
-        // 1. Try to read from the hot cache
-        const cached = await getActiveCache(db);
-        if (cached && cached.envKey === currentEnvKey) {
-            console.log('Loading background from the quick cache');
-            return URL.createObjectURL(cached.data);
+        const res = await fetch('/api/backgrounds', { headers: getAuthHeaders() });
+        if (res.ok) {
+            const data = await res.json();
+            bgState.images = (Array.isArray(data.images) && data.images.length) ? data.images : FALLBACK_BG_IMAGES.slice();
+            bgState.session = data.session || null;
+            bgState.mode = (data.mode === 'session') ? 'session' : 'random';
+            bgState.interval_ms = data.interval_ms || DEFAULT_BG_INTERVAL_MS;
+            bgState.isAdmin = !!data.is_admin;
         }
-
-        // 2. Cache is invalid or missing, recompute
-        const totalCount = await getBGCount(db);
-        if (totalCount === 0) return imageUrls[0];
-
-        let dateSeed = 0;
-        for (let i = 0; i < dateKey.length; i++) dateSeed += dateKey.charCodeAt(i);
-        const index = Math.abs(dateSeed + manualOffset) % totalCount;
-
-        // Use an O(1) ID lookup
-        const bgRecord = await getBGById(db, index);
-        if (bgRecord && bgRecord.data) {
-            // Update the hot cache so the next load is "instant"
-            await updateActiveCache(db, currentEnvKey, bgRecord.data);
-            return URL.createObjectURL(bgRecord.data);
-        }
-    } catch (e) {
-        console.error('Failed to load custom background:', e);
-    }
-
-    return imageUrls[0];
+    } catch (e) { /* offline — keep fallbacks */ }
+    return bgState;
 }
 
 // Get the background element
 const backgroundElement = document.getElementById('background');
 
-let currentBGObjectURL = null;
-
-// Define a function to set the background image
+// Set the visible background image.
 function setBackgroundImage(url) {
-    // Release the old ObjectURL to avoid memory leaks
-    if (currentBGObjectURL && currentBGObjectURL.startsWith('blob:')) {
-        URL.revokeObjectURL(currentBGObjectURL);
-    }
-    currentBGObjectURL = url;
-
+    if (!url) return;
     backgroundElement.style.backgroundImage = `url(${url})`;
-    // Also update the preview image on the settings page
-    const previewImg = document.getElementById('bg-preview-img');
-    const previewContainer = document.getElementById('bg-preview-container');
-    if (previewImg && previewContainer) {
-        previewImg.src = url;
-        previewContainer.style.display = 'block';
-    }
 }
-// Call the function and set the background image
-getRandomBackgroundImage().then(url => {
-    if (url) {
-        setBackgroundImage(url);
+
+// Cross-fade the visible background to `url` using the #background-fade overlay.
+function crossfadeBackground(url) {
+    const fade = document.getElementById('background-fade');
+    if (!fade) { setBackgroundImage(url); return; }
+    // Preload so the fade-in reveals a fully loaded image (no blank flash).
+    const img = new Image();
+    img.onload = () => {
+        fade.style.backgroundImage = `url(${url})`;
+        fade.style.opacity = '1';
+        const done = () => {
+            fade.removeEventListener('transitionend', done);
+            // Commit the image to the base layer, then hide the overlay instantly
+            // (transition disabled) so it's ready for the next fade.
+            setBackgroundImage(url);
+            fade.style.transition = 'none';
+            fade.style.opacity = '0';
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                fade.style.transition = '';
+            }));
+        };
+        fade.addEventListener('transitionend', done);
+    };
+    img.onerror = () => { setBackgroundImage(url); };
+    img.src = url;
+}
+
+// Pick a random image from the list, optionally avoiding `exceptUrl`.
+function pickRandomBackground(exceptUrl) {
+    const list = bgState.images;
+    if (!list.length) return null;
+    if (list.length === 1) return list[0];
+    let next;
+    do {
+        next = list[Math.floor(Math.random() * list.length)];
+    } while (exceptUrl && next === exceptUrl);
+    return next;
+}
+
+// (Re)start the rotation timer using the current effective interval.
+function startBackgroundRotation() {
+    if (bgState.rotateTimer) {
+        clearInterval(bgState.rotateTimer);
+        bgState.rotateTimer = null;
     }
-});
+    if (bgState.images.length < 2) return; // nothing to rotate through
+    bgState.rotateTimer = setInterval(() => {
+        const current = backgroundElement.style.backgroundImage || '';
+        const next = pickRandomBackground(null);
+        if (next && !current.includes(next)) crossfadeBackground(next);
+    }, effectiveBgIntervalMs());
+}
+
+// Choose the first background for this client based on the (effective) connect-mode,
+// then start rotating. Runs once on load.
+async function initBackground() {
+    await fetchBackgroundConfig();
+    const initial = (effectiveBgMode() === 'session' && bgState.session)
+        ? bgState.session
+        : pickRandomBackground(null);
+    setBackgroundImage(initial);
+    startBackgroundRotation();
+}
+
+initBackground();
 async function copyToClipboard(button) {
     const card = button.closest('.card-wrapper');
     const contentElement = card.querySelector('.card-content');
@@ -1926,8 +1965,8 @@ function showSettings() {
     const simpleModeToggle = document.getElementById('simple-mode-toggle');
     simpleModeToggle.checked = localStorage.getItem('simpleMode') === 'true';
 
-    // Update the custom background info
-    updateBGFolderStatus();
+    // Populate the server-side Backgrounds section
+    initBackgroundSettings();
 
     // Set the auto-compress toggle state
     const autoCompressToggle = document.getElementById('auto-compress-toggle');
@@ -2463,157 +2502,205 @@ function initGridMode() {
     updateGridModeIcon(savedMode);
 }
 
-// --- Custom background folder logic (IndexedDB) ---
+// --- Server-side background management (settings panel) ---
 
-async function openBGDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open('LanClipBGDB', 2); // Bump the version to add a cache store
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains('backgrounds')) {
-                db.createObjectStore('backgrounds', { keyPath: 'id' });
-            }
-            if (!db.objectStoreNames.contains('active_cache')) {
-                db.createObjectStore('active_cache', { keyPath: 'id' });
-            }
-        };
-        request.onsuccess = (e) => resolve(e.target.result);
-        request.onerror = (e) => reject(e.target.error);
+function formatBgInterval(totalSec) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}m ${s}s`;
+}
+
+// POST helper for admin background actions (admin password header + JSON body).
+async function bgAdminPost(url, bodyObj) {
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(bodyObj || {})
     });
 }
 
-async function getBGCount(db) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('backgrounds', 'readonly');
-        const store = tx.objectStore('backgrounds');
-        const request = store.count();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+function setBgAdminNote(text) {
+    const note = document.getElementById('bg-admin-note');
+    if (note) note.textContent = text || '';
+}
+
+// Reflect the effective mode on the Random/Session buttons.
+function updateBgModeButtons() {
+    const mode = effectiveBgMode();
+    const r = document.getElementById('bg-mode-random');
+    const s = document.getElementById('bg-mode-session');
+    if (r) r.classList.toggle('active', mode === 'random');
+    if (s) s.classList.toggle('active', mode === 'session');
+}
+
+// Reflect the effective interval on the slider + label.
+function updateBgIntervalUI() {
+    const sec = Math.round(effectiveBgIntervalMs() / 1000);
+    const slider = document.getElementById('bg-interval-slider');
+    const label = document.getElementById('bg-interval-value');
+    if (slider) slider.value = sec;
+    if (label) label.textContent = formatBgInterval(sec);
+}
+
+// Build the admin thumbnail grid. Each tile splits diagonally on hover into a
+// top-left "mark session" button and a bottom-right delete button.
+function renderBackgroundGrid() {
+    const grid = document.getElementById('bg-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    bgState.images.forEach(url => {
+        const tile = document.createElement('div');
+        tile.className = 'bg-tile' + (url === bgState.session ? ' is-session' : '');
+        tile.style.backgroundImage = `url(${url})`;
+        tile.title = url.split('/').pop();
+
+        const mark = document.createElement('div');
+        mark.className = 'bg-tile-half bg-tile-mark';
+        mark.title = 'Serve this image to newly connected clients';
+        mark.innerHTML = '<i class="fas fa-bullseye"></i>';
+        mark.onclick = (e) => { e.stopPropagation(); markSession(url); };
+
+        const del = document.createElement('div');
+        del.className = 'bg-tile-half bg-tile-del';
+        del.title = 'Delete this image from the server';
+        del.innerHTML = '<i class="fas fa-times-circle"></i>';
+        del.onclick = (e) => { e.stopPropagation(); deleteBackground(url); };
+
+        tile.appendChild(mark);
+        tile.appendChild(del);
+        grid.appendChild(tile);
     });
 }
 
-async function getBGById(db, id) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('backgrounds', 'readonly');
-        const store = tx.objectStore('backgrounds');
-        const request = store.get(id);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
-}
-
-async function getActiveCache(db) {
-    return new Promise((resolve) => {
-        const tx = db.transaction('active_cache', 'readonly');
-        const store = tx.objectStore('active_cache');
-        const request = store.get('current');
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => resolve(null);
-    });
-}
-
-async function updateActiveCache(db, envKey, data) {
-    return new Promise((resolve) => {
-        const tx = db.transaction('active_cache', 'readwrite');
-        const store = tx.objectStore('active_cache');
-        store.put({ id: 'current', envKey: envKey, data: data });
-        tx.oncomplete = () => resolve();
-    });
-}
-
-async function selectBackgroundFolder() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.webkitdirectory = true;
-    input.onchange = async (e) => {
-        const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
-        if (files.length === 0) {
-            alert('The selected folder contains no image files');
-            return;
-        }
-
-        try {
-            const db = await openBGDB();
-            const tx = db.transaction('backgrounds', 'readwrite');
-            const store = tx.objectStore('backgrounds');
-            await store.clear();
-
-            // Batch-save the raw Blobs (File objects), manually assigning 0-indexed IDs
-            const savePromises = files.map((file, i) => {
-                return new Promise((resolve, reject) => {
-                    const txInner = db.transaction(['backgrounds', 'active_cache'], 'readwrite');
-                    const request = txInner.objectStore('backgrounds').add({
-                        id: i, // Force consecutive numeric IDs to allow O(1) lookups
-                        name: file.name,
-                        data: file
-                    });
-                    request.onsuccess = () => resolve();
-                    request.onerror = () => reject();
-                });
-            });
-
-            await Promise.all(savePromises);
-
-            // Clear out any existing old cache
-            const txCache = db.transaction('active_cache', 'readwrite');
-            await txCache.objectStore('active_cache').clear();
-            localStorage.setItem('hasCustomBG', 'true');
-            updateBGFolderStatus();
-            const url = await getRandomBackgroundImage();
-            if (url) setBackgroundImage(url);
-            showNotification(`Successfully loaded ${files.length} images as backgrounds`, 'success');
-        } catch (err) {
-            console.error(err);
-            showNotification('Failed to save background images', 'error');
-        }
-    };
-    input.click();
-}
-
-async function clearBackgroundFolder() {
-    if (!confirm('Are you sure you want to clear the custom background folder?')) return;
+// Mark an image as the session image (admin only).
+async function markSession(url) {
     try {
-        const db = await openBGDB();
-        const tx = db.transaction('backgrounds', 'readwrite');
-        await tx.objectStore('backgrounds').clear();
-        localStorage.removeItem('hasCustomBG');
-        localStorage.removeItem('bgManualOffset');
-        updateBGFolderStatus();
-        // Restore the default background
-        const url = await getRandomBackgroundImage();
-        if (url) setBackgroundImage(url);
-        showNotification('Default background restored', 'success');
-    } catch (err) {
-        console.error(err);
-    }
-}
-
-async function updateBGFolderStatus() {
-    const info = document.getElementById('bg-folder-info');
-    if (!info) return;
-
-    if (localStorage.getItem('hasCustomBG') === 'true') {
-        try {
-            const db = await openBGDB();
-            const count = await getBGCount(db);
-            info.textContent = `${count} custom images currently loaded`;
-        } catch (e) {
-            info.textContent = '(Failed to load info)';
+        const res = await bgAdminPost('/api/backgrounds/session', { url });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+            bgState.session = data.session || null;
+            renderBackgroundGrid();
+            showNotification('Session background updated', 'success');
+        } else {
+            showNotification(data.message || 'Failed (admin password required)', 'error');
         }
+    } catch (e) { showNotification('Request failed', 'error'); }
+}
+
+// Delete an image from the server (admin only).
+async function deleteBackground(url) {
+    if (!confirm('Delete this background from the server?')) return;
+    try {
+        const res = await bgAdminPost('/api/backgrounds/delete', { url });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+            bgState.images = data.images || [];
+            if (bgState.session === url) bgState.session = null;
+            renderBackgroundGrid();
+            showNotification('Background deleted', 'success');
+        } else {
+            showNotification(data.message || 'Failed (admin password required)', 'error');
+        }
+    } catch (e) { showNotification('Request failed', 'error'); }
+}
+
+// Upload one or more image files to the server's backgrounds/ folder (admin only).
+async function uploadBackgroundFiles(fileList) {
+    const files = Array.from(fileList || []).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    const form = new FormData();
+    files.forEach(f => form.append('file', f));
+    try {
+        const res = await fetch('/api/backgrounds/upload', {
+            method: 'POST', headers: getAuthHeaders(), body: form
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+            bgState.images = data.images || bgState.images;
+            renderBackgroundGrid();
+            showNotification(`Uploaded ${files.length} image(s)`, 'success');
+        } else {
+            showNotification(data.message || 'Upload failed (admin password required)', 'error');
+        }
+    } catch (e) { showNotification('Upload failed', 'error'); }
+}
+
+// Drag-and-drop upload on the grid.
+function bgGridDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('bg-drag-over'); }
+function bgGridDragLeave(e) { e.currentTarget.classList.remove('bg-drag-over'); }
+function bgGridDrop(e) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('bg-drag-over');
+    if (e.dataTransfer && e.dataTransfer.files) uploadBackgroundFiles(e.dataTransfer.files);
+}
+
+// Non-admins unlock management by entering the admin password.
+async function unlockBackgroundAdmin() {
+    const pwd = prompt('Enter the admin password to manage backgrounds:');
+    if (!pwd) return;
+    const ok = await verifyPassword(pwd);
+    if (ok) {
+        showNotification('Admin features unlocked', 'success');
+        await initBackgroundSettings();
     } else {
-        info.textContent = '(No custom folder selected)';
-        const previewContainer = document.getElementById('bg-preview-container');
-        if (previewContainer) previewContainer.style.display = 'none';
+        showNotification('Incorrect password', 'error');
     }
 }
 
-async function nextBackground() {
-    const currentOffset = parseInt(localStorage.getItem('bgManualOffset')) || 0;
-    localStorage.setItem('bgManualOffset', currentOffset + 1);
-    const url = await getRandomBackgroundImage();
-    if (url) {
-        setBackgroundImage(url);
+// Change connect-mode: apply locally immediately; persist as the global default if admin.
+async function setBgMode(mode) {
+    if (mode !== 'random' && mode !== 'session') return;
+    localStorage.setItem('bgMode', mode);
+    updateBgModeButtons();
+    const target = (mode === 'session' && bgState.session) ? bgState.session : pickRandomBackground(null);
+    if (target) crossfadeBackground(target);
+
+    if (bgState.isAdmin) {
+        const res = await bgAdminPost('/api/backgrounds/config', { mode });
+        if (res.ok) { bgState.mode = mode; setBgAdminNote('Saved as the default for all clients.'); }
+        else { setBgAdminNote('Applied on this device only.'); }
+    } else {
+        setBgAdminNote('Applied on this device only.');
     }
+}
+
+// Slider drag: update label + live rotation interval (local to this device).
+function onBgIntervalInput(val) {
+    const sec = parseInt(val) || 180;
+    localStorage.setItem('bgIntervalMs', sec * 1000);
+    const label = document.getElementById('bg-interval-value');
+    if (label) label.textContent = formatBgInterval(sec);
+    startBackgroundRotation(); // restart the timer with the new interval
+}
+
+// Slider released: persist as the global default if admin.
+async function onBgIntervalCommit(val) {
+    const ms = (parseInt(val) || 180) * 1000;
+    if (bgState.isAdmin) {
+        const res = await bgAdminPost('/api/backgrounds/config', { interval_ms: ms });
+        if (res.ok) { bgState.interval_ms = ms; setBgAdminNote('Saved as the default for all clients.'); }
+        else { setBgAdminNote('Applied on this device only.'); }
+    } else {
+        setBgAdminNote('Applied on this device only.');
+    }
+}
+
+// Populate the Backgrounds settings section (called when the settings modal opens).
+async function initBackgroundSettings() {
+    await fetchBackgroundConfig();
+    const adminArea = document.getElementById('bg-admin-area');
+    const unlock = document.getElementById('bg-admin-unlock');
+    if (bgState.isAdmin) {
+        if (adminArea) adminArea.style.display = 'block';
+        if (unlock) unlock.style.display = 'none';
+        renderBackgroundGrid();
+    } else {
+        if (adminArea) adminArea.style.display = 'none';
+        if (unlock) unlock.style.display = 'block';
+    }
+    updateBgModeButtons();
+    updateBgIntervalUI();
+    setBgAdminNote('');
 }
 
 // --- Apple-style notification system ---
