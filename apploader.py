@@ -1,3 +1,8 @@
+# DEPRECATED: This separate launcher is no longer built or shipped.
+# It spawned the bundled clipboard EXE as a hidden child process (SW_HIDE), a pattern
+# that AV engines flag as dropper/loader behavior. The app now runs as a single
+# windowed process that defaults to tray mode (see app.py), so no loader is needed.
+# Kept only for reference; do not add this back to the build pipeline.
 import argparse
 import subprocess
 import webbrowser

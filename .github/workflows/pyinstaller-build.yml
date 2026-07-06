@@ -44,12 +44,12 @@ jobs:
             run: |
                 pip install -r requirements.txt
         -   name: build by cmd
+            # --windowed builds a no-console executable. The app defaults to tray mode
+            # when frozen, so LAN_clipboard_app.exe runs silently in the tray on its own.
+            # This drops the separate --onefile --noconsole "start.exe" loader and the
+            # hidden-window launch pattern that AV engines flagged.
             run: |
-                pyinstaller --name=LAN_clipboard_app --add-data "templates;templates" --add-data "static;static"  app.py -y
-                pyinstaller --name=start --onefile --noconsole apploader.py -y
-        -   name: Move start.exe to LAN_clipboard_app folder
-            run: |
-              Move-Item -Path "dist/start.exe" -Destination "dist/LAN_clipboard_app/" -Force
+                pyinstaller --name=LAN_clipboard_app --windowed --version-file build-script/version_info.txt --add-data "templates;templates" --add-data "static;static" app.py -y
         -   name: Copy artifacts
             uses: actions/upload-artifact@v4
             with:

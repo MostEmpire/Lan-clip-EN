@@ -92,48 +92,8 @@ if ($response -eq 'y') {
         if ($batchExitCode -eq 0) {
             Write-Host "Windows build successful (batch script exited with code 0)." -ForegroundColor Green
 
-            # ========================================================
-            # Resolve traymode.vbs copy issue (Use absolute paths)
-            # ========================================================
-            $vbsSource = Join-Path $projectRoot "traymode.vbs"
-            $targetBaseDir = Join-Path $projectRoot "dist"
-
-            if (-not (Test-Path $vbsSource)) {
-                Write-Host "[ERROR] Source file 'traymode.vbs' not found in root! Copy aborted." -ForegroundColor Red
-            } elseif (-not (Test-Path $targetBaseDir -PathType Container)) {
-                Write-Host "[ERROR] Target directory 'dist' doesn't exist! build-win.bat may have failed." -ForegroundColor Red
-            } else {
-                # Find compiled target subdirectories
-                $subDirs = @(Get-ChildItem -Path $targetBaseDir -Directory -ErrorAction SilentlyContinue)
-                
-                if ($subDirs.Count -gt 0) {
-                    $lanClipDir = $subDirs | Where-Object { $_.Name -eq "lan-clip" }
-                    if ($lanClipDir) {
-                        $actualTargetDir = $lanClipDir.FullName
-                    } else {
-                        $actualTargetDir = $subDirs[0].FullName
-                    }
-                } else {
-                    $actualTargetDir = $targetBaseDir
-                }
-
-                $vbsDestinationPath = Join-Path $actualTargetDir "traymode.vbs"
-                Write-Host "Copying 'traymode.vbs' to '$actualTargetDir' ..." -ForegroundColor Cyan
-                
-                try {
-                    Copy-Item -Path $vbsSource -Destination $vbsDestinationPath -Force -ErrorAction Stop
-                    
-                    if (Test-Path $vbsDestinationPath) {
-                        Write-Host "[SUCCESS] traymode.vbs copied successfully to: $vbsDestinationPath" -ForegroundColor Green
-                    } else {
-                        Write-Host "[SEVERE] Copy-Item succeeded but file is missing at: $vbsDestinationPath" -ForegroundColor Red
-                    }
-                } catch {
-                    Write-Host "[FATAL ERROR] Failed to copy traymode.vbs! (Check permissions/antivirus)" -ForegroundColor Red
-                    Write-Host "Details: $($_.Exception.Message)" -ForegroundColor Red
-                }
-            }
-            # ========================================================
+            # traymode.vbs is no longer needed: lan-clip.exe is built --windowed and
+            # defaults to tray mode, so it launches silently when double-clicked.
 
             # Zip the dist directory
             $zipSourcePath = Join-Path $projectRoot "dist"

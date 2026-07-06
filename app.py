@@ -868,18 +868,26 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the LAN clipboard app.')
     parser.add_argument('--port', type=int, default=port, help='Port number to run the app on.')
     parser.add_argument('--tray', action='store_true', help='Enable system tray mode')
+    parser.add_argument('--no-tray', action='store_true', help='Disable system tray mode (run the web server only)')
     args = parser.parse_args()
-    
+
     port = args.port
-    
+
+    # When running as a packaged (windowed) executable, default to tray mode so the
+    # app has a visible control and can be closed. A --noconsole build started without
+    # a tray would have no window and no way to interact with it. This makes the EXE
+    # directly double-clickable and removes the need for a separate hidden launcher
+    # (previously traymode.vbs / the apploader "start.exe"), which AV engines flagged.
+    use_tray = args.tray or (getattr(sys, 'frozen', False) and not args.no_tray)
+
     from waitress import serve
-    
+
     def start_server():
         print(f"Server running on http://localhost:{port}")
         net_utils.display_server_info(port)
         serve(app, host="0.0.0.0", port=port)
 
-    if args.tray:
+    if use_tray:
         # Tray mode: start the server in a background thread
         server_thread = threading.Thread(target=start_server, daemon=True)
         server_thread.start()
