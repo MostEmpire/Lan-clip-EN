@@ -70,6 +70,9 @@ python app.py --tray # clipboard monitoring mode
 ```
 
 ## Changelog
+2026-06-27
+- Added background switching feature
+
 2026-06-15
 - Implemented better use of the space in the text input bubble.
 - Added Paste-from-clipboard feature.
