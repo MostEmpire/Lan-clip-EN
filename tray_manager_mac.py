@@ -6,18 +6,23 @@ import webbrowser
 import threading
 import json
 from PIL import Image, ImageDraw
-import AppKit # Import the native macOS library
 
-# Tell macOS: I am a background app, do not show an icon in the Dock!
-AppKit.NSApplication.sharedApplication().setActivationPolicy_(1)
-
-# Make sure pystray is imported
+# GUI deps (pyobjc's AppKit, pystray) may be missing when running from source.
+# An import failure must not kill the process: app.py imports this module on
+# macOS even for web-only (--no-tray) runs, so tray mode just becomes unavailable.
 try:
+    import AppKit # Import the native macOS library
+
+    # Tell macOS: I am a background app, do not show an icon in the Dock!
+    AppKit.NSApplication.sharedApplication().setActivationPolicy_(1)
+
     import pystray
     from pystray import MenuItem as item, Menu
-except ImportError:
-    print("Error: pystray library is missing. Please run: pip3 install pystray pyobjc")
-    sys.exit(1)
+except ImportError as e:
+    print(f"Tray unavailable ({e}). Install with: pip3 install pystray pyobjc-framework-Cocoa")
+    pystray = None
+    item = None
+    Menu = None
 
 from clipboard_service import ClipboardMonitor
 
@@ -177,5 +182,10 @@ class TrayManager:
         self.icon.run()
 
 def start_tray(port, icon_path):
+    if pystray is None:
+        # Tray deps are missing but the web server (background thread) still works;
+        # block forever so the daemon server thread isn't killed by process exit.
+        print("Running without tray icon; the web server stays available.")
+        threading.Event().wait()
     tray = TrayManager(port, icon_path)
     tray.run()
