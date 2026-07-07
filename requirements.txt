@@ -1,7 +1,8 @@
 flask
 pyinstaller ; sys_platform == 'win32'
 pillow
-pystray ; sys_platform == 'win32'
+pystray ; sys_platform == 'win32' or sys_platform == 'darwin'
+pyobjc-framework-Cocoa ; sys_platform == 'darwin'
 Waitress
 qrcode
 pyperclip
