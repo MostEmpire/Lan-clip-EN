@@ -50,6 +50,24 @@ jobs:
             # hidden-window launch pattern that AV engines flagged.
             run: |
                 pyinstaller --name=LAN_clipboard_app --windowed --version-file build-script/version_info.txt --add-data "templates;templates" --add-data "static;static" app.py -y
+        -   name: Code sign executables (optional)
+            shell: pwsh
+            env:
+                WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+                WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+            run: |
+                if (-not $env:WINDOWS_CERT_BASE64) {
+                    Write-Host "No signing certificate configured (secrets.WINDOWS_CERT_BASE64 absent); skipping code signing."
+                    exit 0
+                }
+                $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+                [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+                $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+                Get-ChildItem -Path dist -Recurse -Filter *.exe | ForEach-Object {
+                    & $signtool.FullName sign /f $pfxPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
+                    if ($LASTEXITCODE -ne 0) { throw "signtool failed for $($_.FullName)" }
+                }
+                Remove-Item $pfxPath -Force
         -   name: Copy artifacts
             uses: actions/upload-artifact@v4
             with:
