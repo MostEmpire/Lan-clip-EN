@@ -24,9 +24,9 @@ Batch deletion is very handy. No more aiming the mouse to click buttons.
 
 
 ## Clipboard Monitoring Mode
-The default mode only provides web functionality. Clipboard monitoring mode can be started with the --tray argument.
+The packaged executable starts in tray mode by default. When running from source, clipboard monitoring mode can be started with the --tray argument (use --no-tray to run the web server only).
 Once enabled, a small green lizard appears in the tray. Right-click to start monitoring, and clipboard contents are automatically added to lan-clip.
-- Windows users can launch it directly using traymode.vbs from the release.
+- Windows users can launch it by simply double-clicking lan-clip.exe from the release — it runs silently in the tray (no console window).
 - Mac users can ask an AI how to write a hidden launch command. Write your own and add it to your .zshrc file. For example: `alias lanclip="cd /Users/kasusa/Documents/GitHub/Lan-clip; nohup python3 app.py --tray > /dev/null 2>&1 &"`
 - Linux users may need to modify tray_manager.py and run from the Python source code, since I've only tested the Windows and Mac versions.
 
@@ -70,6 +70,9 @@ python app.py --tray # clipboard monitoring mode
 ```
 
 ## Changelog
+2026-07-07
+- The application now runs in tray mode by default (trust increase)
+
 2026-06-27
 - Added background switching feature
 

@@ -1,5 +1,112 @@
+import sys
 import socket
 import qrcode
+
+def _windows_adapter_map():
+    """Windows: {ip_string: adapter Description} via iphlpapi.GetAdaptersAddresses.
+    Pure stdlib ctypes (no pywin32) so it bundles cleanly into a frozen build."""
+    import ctypes
+    from ctypes import wintypes
+
+    AF_UNSPEC, AF_INET, AF_INET6 = 0, 2, 23
+    GAA_FLAGS = 0x0002 | 0x0004 | 0x0008  # skip anycast, multicast, DNS servers
+    ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW = 0, 111
+
+    class SOCKADDR(ctypes.Structure):
+        _fields_ = [("sa_family", wintypes.USHORT), ("sa_data", ctypes.c_ubyte * 26)]
+
+    class SOCKET_ADDRESS(ctypes.Structure):
+        _fields_ = [("lpSockaddr", ctypes.POINTER(SOCKADDR)), ("iSockaddrLength", ctypes.c_int)]
+
+    class IP_ADAPTER_UNICAST_ADDRESS(ctypes.Structure):
+        pass
+    IP_ADAPTER_UNICAST_ADDRESS._fields_ = [
+        ("Length", wintypes.ULONG), ("Flags", wintypes.DWORD),
+        ("Next", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
+        ("Address", SOCKET_ADDRESS),
+        ("PrefixOrigin", ctypes.c_int), ("SuffixOrigin", ctypes.c_int), ("DadState", ctypes.c_int),
+        ("ValidLifetime", wintypes.ULONG), ("PreferredLifetime", wintypes.ULONG),
+        ("LeaseLifetime", wintypes.ULONG), ("OnLinkPrefixLength", ctypes.c_ubyte),
+    ]
+
+    class IP_ADAPTER_ADDRESSES(ctypes.Structure):
+        pass
+    IP_ADAPTER_ADDRESSES._fields_ = [
+        ("Length", wintypes.ULONG), ("IfIndex", wintypes.DWORD),
+        ("Next", ctypes.POINTER(IP_ADAPTER_ADDRESSES)),
+        ("AdapterName", ctypes.c_char_p),
+        ("FirstUnicastAddress", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
+        ("FirstAnycastAddress", ctypes.c_void_p),
+        ("FirstMulticastAddress", ctypes.c_void_p),
+        ("FirstDnsServerAddress", ctypes.c_void_p),
+        ("DnsSuffix", ctypes.c_wchar_p),
+        ("Description", ctypes.c_wchar_p),
+        ("FriendlyName", ctypes.c_wchar_p),
+    ]  # remaining fields omitted; we only read up to FriendlyName and walk via Next
+
+    GetAdaptersAddresses = ctypes.windll.iphlpapi.GetAdaptersAddresses
+    GetAdaptersAddresses.restype = wintypes.ULONG
+
+    mapping = {}
+    size = ctypes.c_ulong(15 * 1024)
+    for _ in range(3):  # grow the buffer if the first guess was too small
+        buf = ctypes.create_string_buffer(size.value)
+        ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAGS, None,
+                                   ctypes.cast(buf, ctypes.POINTER(IP_ADAPTER_ADDRESSES)),
+                                   ctypes.byref(size))
+        if ret == ERROR_BUFFER_OVERFLOW:
+            continue
+        if ret != ERROR_SUCCESS:
+            return mapping
+        adapter = ctypes.cast(buf, ctypes.POINTER(IP_ADAPTER_ADDRESSES))
+        while adapter:
+            a = adapter.contents
+            desc = a.Description or a.FriendlyName
+            ua = a.FirstUnicastAddress
+            while ua:
+                sa = ua.contents.Address.lpSockaddr
+                if sa and desc:
+                    fam = sa.contents.sa_family
+                    raw = bytes(sa.contents.sa_data)  # bytes after the 2-byte sa_family
+                    ip = None
+                    if fam == AF_INET:
+                        ip = ".".join(str(b) for b in raw[2:6])
+                    elif fam == AF_INET6:
+                        ip = socket.inet_ntop(socket.AF_INET6, raw[6:22])
+                    if ip:
+                        mapping[ip] = desc
+                ua = ua.contents.Next
+            adapter = a.Next
+        return mapping
+    return mapping
+
+def get_adapter_names():
+    """Best-effort map of {ip_string: human-readable adapter name}, cross-platform.
+
+    - Windows: device descriptions via GetAdaptersAddresses (stdlib ctypes), e.g.
+      'Intel(R) Wireless-AC 9560' or 'VirtualBox Host-Only Ethernet Adapter'.
+    - Other platforms: interface names via psutil if it happens to be installed.
+    Returns {} on failure; callers fall back to a generic label when an IP is missing.
+    """
+    mapping = {}
+    if sys.platform == 'win32':
+        try:
+            mapping = _windows_adapter_map()
+        except Exception:
+            mapping = {}
+
+    if not mapping:
+        # Cross-platform fallback (Linux/macOS, or Windows if the API call failed).
+        try:
+            import psutil
+            for name, addrs in psutil.net_if_addrs().items():
+                for a in addrs:
+                    if getattr(a, 'address', None):
+                        mapping.setdefault(a.address.split('%')[0], name)
+        except Exception:
+            pass
+
+    return mapping
 
 def get_host_ips():
     """Get all internal IPv4 and IPv6 addresses of the machine's physical network adapters"""
