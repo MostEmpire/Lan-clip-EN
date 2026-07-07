@@ -15,6 +15,7 @@ import auth_service
 import json
 import random
 import net_utils
+import mdns_service
 if sys.platform == 'darwin':
     import tray_manager_mac as tray_manager
 else:
@@ -866,12 +867,18 @@ threading.Thread(target=_auto_delete_worker, daemon=True).start()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the LAN clipboard app.')
-    parser.add_argument('--port', type=int, default=port, help='Port number to run the app on.')
+    parser.add_argument('--port', type=int, default=None,
+                        help=f'Port number to run the app on (default: 80 if free, otherwise {port}).')
     parser.add_argument('--tray', action='store_true', help='Enable system tray mode')
     parser.add_argument('--no-tray', action='store_true', help='Disable system tray mode (run the web server only)')
     args = parser.parse_args()
 
-    port = args.port
+    if args.port is not None:
+        port = args.port
+    else:
+        # Prefer 80 so the mDNS name needs no port suffix (http://clip.local/);
+        # fall back to the platform default when 80 is taken or privileged.
+        port = net_utils.pick_server_port(fallback=port)
 
     # When running as a packaged (windowed) executable, default to tray mode so the
     # app has a visible control and can be closed. A --noconsole build started without
@@ -883,8 +890,9 @@ if __name__ == '__main__':
     from waitress import serve
 
     def start_server():
-        print(f"Server running on http://localhost:{port}")
-        net_utils.display_server_info(port)
+        print(f"Server running on {net_utils.format_url('localhost', port)}")
+        mdns_active = mdns_service.start(port)
+        net_utils.display_server_info(port, mdns_url=mdns_service.url(port) if mdns_active else None)
         serve(app, host="0.0.0.0", port=port)
 
     if use_tray:

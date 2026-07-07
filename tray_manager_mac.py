@@ -112,7 +112,8 @@ class TrayManager:
         return action
 
     def _open_browser(self, icon, item):
-        webbrowser.open(f'http://127.0.0.1:{self.port}')
+        import net_utils
+        webbrowser.open(net_utils.format_url('127.0.0.1', self.port))
 
     def _toggle_listener(self, icon, item):
         self._listener_enabled = not self._listener_enabled
@@ -138,6 +139,9 @@ class TrayManager:
 
     def _exit(self, icon, item):
         self.monitor.stop()
+        # Send mDNS goodbye packets before the hard exit (os._exit skips atexit)
+        import mdns_service
+        mdns_service.stop()
         icon.stop()
         os._exit(0)
 

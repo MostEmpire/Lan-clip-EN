@@ -72,6 +72,7 @@ python app.py --tray # clipboard monitoring mode
 ## Changelog
 2026-07-07
 - The application now runs in tray mode by default (trust increase)
+- Added mDNS feature to the application, so that other users on the network can more easily connect to the web interface
 
 2026-06-27
 - Added background switching feature

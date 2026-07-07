@@ -95,7 +95,8 @@ class TrayManager:
             self.icon.icon = self._get_current_icon()
 
     def _open_browser(self, icon, item):
-        webbrowser.open(f'http://127.0.0.1:{self.port}')
+        import net_utils
+        webbrowser.open(net_utils.format_url('127.0.0.1', self.port))
 
     def _show_qr_codes(self, icon, item):
         """Open a popup listing a QR code per active network adapter so phones can
@@ -111,16 +112,18 @@ class TrayManager:
         real adapter name when the OS can provide it (e.g. 'Intel(R) Wireless-AC
         9560'), otherwise a generic '<IPv4/IPv6> adapter' fallback."""
         import net_utils
+        import mdns_service
         try:
             names = net_utils.get_adapter_names()
         except Exception:
             names = {}
         entries = []
+        if mdns_service.is_active():
+            entries.append((mdns_service.url(self.port),
+                            "mDNS name (may not work on Android)",
+                            f"{mdns_service.hostname()}.local"))
         for ip, version in net_utils.get_host_ips():
-            if version == 'IPv6':
-                url = f"http://[{ip}]:{self.port}"
-            else:
-                url = f"http://{ip}:{self.port}"
+            url = net_utils.format_url(ip, self.port, ipv6=(version == 'IPv6'))
             label = names.get(ip) or f"{version} adapter"
             entries.append((url, label, ip))
         return entries
@@ -236,6 +239,113 @@ class TrayManager:
             except Exception:
                 pass
 
+    def _show_mdns_settings(self, icon, item):
+        """Open the mDNS settings popup (centered). Same single-window threading
+        pattern as the QR popup: pystray owns the main thread, Tk gets its own."""
+        if getattr(self, '_mdns_thread', None) and self._mdns_thread.is_alive():
+            return  # already open
+        self._mdns_thread = threading.Thread(target=self._mdns_window_worker, daemon=True)
+        self._mdns_thread.start()
+
+    def _mdns_window_worker(self):
+        try:
+            import tkinter as tk
+        except Exception as e:
+            print(f"mDNS window unavailable (tkinter missing): {e}")
+            return
+        import mdns_service
+
+        BG, CARD, FG, ACCENT, MUTED = "#1e1e1e", "#2a2a2a", "#ffffff", "#9fd0ff", "#aaaaaa"
+        OK_GREEN, ERR_RED = "#7ee787", "#ff6b6b"
+
+        root = tk.Tk()
+        root.title("Lan-clip - mDNS")
+        root.configure(bg=BG)
+        root.withdraw()  # stay hidden until centered, so it never flashes at the default position
+
+        tk.Label(root, text="mDNS network name", fg=FG, bg=BG,
+                 font=("Segoe UI", 12, "bold")).pack(pady=(16, 4), padx=24)
+        url_var = tk.StringVar(value=mdns_service.url(self.port))
+        tk.Label(root, textvariable=url_var, fg=ACCENT, bg=BG,
+                 font=("Consolas", 13)).pack(pady=(0, 14), padx=24)
+
+        # Prefix editor: [entry].local  [Save]
+        row = tk.Frame(root, bg=BG)
+        row.pack(padx=24)
+        entry = tk.Entry(row, width=16, bg=CARD, fg=FG, insertbackground=FG,
+                         relief="flat", font=("Consolas", 12), justify="right")
+        entry.insert(0, mdns_service.hostname())
+        entry.pack(side="left", ipady=4)
+        tk.Label(row, text=".local", fg=MUTED, bg=BG,
+                 font=("Consolas", 12)).pack(side="left", padx=(2, 12))
+
+        feedback = tk.Label(root, text="", fg=MUTED, bg=BG, wraplength=380,
+                            justify="center", font=("Segoe UI", 9))
+        feedback.pack(pady=(6, 10), padx=24)
+
+        status_lbl = tk.Label(root, text="", bg=BG, font=("Segoe UI", 12, "bold"))
+        status_lbl.pack(pady=(2, 2))
+        # Problem details; packed/unpacked dynamically by _refresh_status
+        detail = tk.Label(root, text="", fg=FG, bg=CARD, wraplength=380,
+                          justify="left", font=("Segoe UI", 9), padx=10, pady=8)
+
+        close_btn = tk.Button(root, text="Close", command=root.destroy, bg="#3a3a3a", fg=FG,
+                              relief="flat", padx=18, pady=6, cursor="hand2")
+
+        def refresh_status():
+            state, msg = mdns_service.status()
+            if state == 'ok':
+                status_lbl.config(text="All OK", fg=OK_GREEN)
+            elif state == 'checking':
+                status_lbl.config(text="Checking...", fg=MUTED)
+            else:
+                status_lbl.config(text="Problem", fg=ERR_RED)
+            if state == 'problem' and msg:
+                detail.config(text=msg)
+                detail.pack(pady=(4, 4), padx=24, fill="x", before=close_btn)
+            else:
+                detail.pack_forget()
+            url_var.set(mdns_service.url(self.port))
+            root.after(1000, refresh_status)
+
+        save_result = []  # set_hostname blocks ~1-2s (re-registration); run off the UI thread
+
+        def poll_save():
+            if not save_result:
+                root.after(200, poll_save)
+                return
+            ok, msg = save_result.pop()
+            feedback.config(text=msg, fg=(OK_GREEN if ok else ERR_RED))
+            save_btn.config(state="normal")
+
+        def do_save():
+            prefix = entry.get()
+            save_btn.config(state="disabled")
+            feedback.config(text="Saving...", fg=MUTED)
+            threading.Thread(target=lambda: save_result.append(mdns_service.set_hostname(prefix)),
+                             daemon=True).start()
+            poll_save()
+
+        save_btn = tk.Button(row, text="Save", command=do_save, bg="#3a3a3a", fg=FG,
+                             relief="flat", padx=14, pady=4, cursor="hand2")
+        save_btn.pack(side="left")
+        close_btn.pack(pady=(10, 16))
+
+        root.bind("<Escape>", lambda e: root.destroy())
+        entry.bind("<Return>", lambda e: do_save())
+        refresh_status()
+
+        # Center on screen (position only - the window grows if details appear)
+        root.update_idletasks()
+        x = max(0, (root.winfo_screenwidth() - root.winfo_reqwidth()) // 2)
+        y = max(0, (root.winfo_screenheight() - root.winfo_reqheight()) // 2)
+        root.geometry(f"+{x}+{y}")
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        root.after(400, lambda: root.attributes("-topmost", False))
+        root.mainloop()
+
     def _open_folder(self, folder_name):
         def inner(icon, item):
             path = os.path.join(os.path.abspath("."), folder_name)
@@ -271,6 +381,9 @@ class TrayManager:
 
     def _exit(self, icon, item):
         self.monitor.stop()
+        # Send mDNS goodbye packets before the hard exit (os._exit skips atexit)
+        import mdns_service
+        mdns_service.stop()
         icon.stop()
         os._exit(0)
 
@@ -295,6 +408,7 @@ class TrayManager:
         menu = (
             item('Open browser', self._open_browser),
             item('Show QR codes', self._show_qr_codes),
+            item('mDNS', self._show_mdns_settings),
             item('Browse local files', folder_menu),
             Menu.SEPARATOR,
             item('Listening mode (on if icon has green dot)', self._toggle_listener, checked=lambda item: self._listener_enabled),
