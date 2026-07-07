@@ -16,8 +16,10 @@ jobs:
             python-version: ${{ matrix.python-version }}
     # You can test your matrix by printing the current Python version
     -   name: install pip requirements
+        # requirements.txt marks pyinstaller win32-only (the Docker image doesn't
+        # need it), so build runners must install it explicitly.
         run: |
-            pip install -r requirements.txt
+            pip install -r requirements.txt pyinstaller
     -   name: build by cmd
         run: |
             pyinstaller --name=LAN_clipboard_app --add-data "templates:templates" --add-data "static:static" app.py -y
@@ -87,8 +89,10 @@ jobs:
                 python-version: ${{ matrix.python-version }}
         # You can test your matrix by printing the current Python version
         -   name: install pip requirements
+            # requirements.txt marks pyinstaller win32-only (the Docker image doesn't
+            # need it), so build runners must install it explicitly.
             run: |
-                pip install -r requirements.txt
+                pip install -r requirements.txt pyinstaller
         -   name: build by cmd
             run: |
                 pyinstaller --name=LAN_clipboard_app --add-data "templates:templates" --add-data "static:static" app.py -y
