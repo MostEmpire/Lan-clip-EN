@@ -8,3 +8,4 @@ qrcode
 pyperclip
 requests
 pywin32 ; sys_platform == 'win32'
+zeroconf

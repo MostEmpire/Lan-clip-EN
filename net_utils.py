@@ -2,6 +2,27 @@ import sys
 import socket
 import qrcode
 
+def format_url(host, port, ipv6=False):
+    """Build an http:// URL, omitting the port when it's the HTTP default (80)."""
+    hostpart = f"[{host}]" if ipv6 else host
+    return f"http://{hostpart}" if port == 80 else f"http://{hostpart}:{port}"
+
+def pick_server_port(fallback, preferred=80):
+    """Return `preferred` if this machine can bind it on all interfaces, else `fallback`.
+
+    Port 80 lets the mDNS name work without a port suffix (http://clip.local/).
+    The probe bind fails when another server (e.g. IIS/http.sys) holds the port or
+    when the OS treats it as privileged (Linux without CAP_NET_BIND_SERVICE)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(("0.0.0.0", preferred))
+        finally:
+            s.close()
+        return preferred
+    except OSError:
+        return fallback
+
 def _windows_adapter_map():
     """Windows: {ip_string: adapter Description} via iphlpapi.GetAdaptersAddresses.
     Pure stdlib ctypes (no pywin32) so it bundles cleanly into a frozen build."""
@@ -175,23 +196,23 @@ def get_host_ips():
     
     return ips
 
-def display_server_info(port):
+def display_server_info(port, mdns_url=None):
     """Display the access URL and QR code in the terminal"""
     ips = get_host_ips()
-    
+
     print("\n" + "╔" + "═"*60 + "╗")
     print(f"║  Lan-clip service started, listening on port: {port:<31} ║")
     print("╚" + "═"*60 + "╝")
-    
+
+    if mdns_url:
+        print(f"\n▶ [mDNS] Access URL: {mdns_url}")
+        print("  (Works on Windows / macOS / iOS / most Linux; Android usually cannot resolve .local names)")
+
     if not ips:
-        print(f"Local access: http://127.0.0.1:{port}")
-    
+        print(f"Local access: {format_url('127.0.0.1', port)}")
+
     for ip, version in ips:
-        if version == "IPv4":
-            url = f"http://{ip}:{port}"
-        else:
-            # IPv6 addresses need to be wrapped in brackets within a URL
-            url = f"http://[{ip}]:{port}"
+        url = format_url(ip, port, ipv6=(version != "IPv4"))
 
         print(f"\n▶ [{version}] Access URL: {url}")
         print("  Scan the QR code with your phone for quick access:")
