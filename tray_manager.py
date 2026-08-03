@@ -250,6 +250,7 @@ class TrayManager:
     def _mdns_window_worker(self):
         try:
             import tkinter as tk
+            from tkinter import ttk
         except Exception as e:
             print(f"mDNS window unavailable (tkinter missing): {e}")
             return
@@ -263,11 +264,40 @@ class TrayManager:
         root.configure(bg=BG)
         root.withdraw()  # stay hidden until centered, so it never flashes at the default position
 
+        def add_copy_menu(widget, get_all):
+            """Right-click > Copy: the selection if there is one, else the full text."""
+            menu = tk.Menu(widget, tearoff=0, bg=CARD, fg=FG,
+                           activebackground="#3a3a3a", activeforeground=FG)
+
+            def do_copy():
+                try:
+                    text = widget.selection_get()
+                except Exception:
+                    text = get_all()
+                root.clipboard_clear()
+                root.clipboard_append(text)
+
+            menu.add_command(label="Copy", command=do_copy)
+            widget.bind("<Button-3>", lambda e: menu.tk_popup(e.x_root, e.y_root))
+
         tk.Label(root, text="mDNS network name", fg=FG, bg=BG,
                  font=("Segoe UI", 12, "bold")).pack(pady=(16, 4), padx=24)
-        url_var = tk.StringVar(value=mdns_service.url(self.port))
-        tk.Label(root, textvariable=url_var, fg=ACCENT, bg=BG,
-                 font=("Consolas", 13)).pack(pady=(0, 14), padx=24)
+        # Read-only Entry instead of Label so the URL can be selected and copied.
+        # All variables get an explicit master: with two Tk instances in this
+        # process (QR window + this one), an unbound StringVar can attach to the
+        # other window's interpreter and the widget then shows nothing.
+        url_var = tk.StringVar(master=root, value=mdns_service.url(self.port))
+        url_entry = tk.Entry(root, textvariable=url_var, state="readonly", justify="center",
+                             readonlybackground=BG, fg=ACCENT, relief="flat", bd=0,
+                             highlightthickness=0, font=("Consolas", 13))
+        url_entry.pack(pady=(0, 2), padx=24, fill="x")
+        add_copy_menu(url_entry, url_var.get)
+        ip_var = tk.StringVar(master=root, value="")
+        ip_entry = tk.Entry(root, textvariable=ip_var, state="readonly", justify="center",
+                            readonlybackground=BG, fg=MUTED, relief="flat", bd=0,
+                            highlightthickness=0, font=("Segoe UI", 9))
+        ip_entry.pack(pady=(0, 12), padx=24, fill="x")
+        add_copy_menu(ip_entry, ip_var.get)
 
         # Prefix editor: [entry].local  [Save]
         row = tk.Frame(root, bg=BG)
@@ -279,18 +309,68 @@ class TrayManager:
         tk.Label(row, text=".local", fg=MUTED, bg=BG,
                  font=("Consolas", 12)).pack(side="left", padx=(2, 12))
 
+        # Source adapter: the name resolves to exactly one adapter's IP
+        tk.Label(root, text="Advertised adapter", fg=MUTED, bg=BG,
+                 font=("Segoe UI", 9)).pack(pady=(12, 2))
+        adapter_options = mdns_service.available_adapters()  # [(label, value), ...]
+        adapter_lookup = dict(adapter_options)
+        current_label = adapter_options[0][0]
+        for label, value in adapter_options:
+            if value == mdns_service.adapter():
+                current_label = label
+                break
+        adapter_var = tk.StringVar(master=root, value=current_label)
+        # ttk.Combobox instead of tk.OptionMenu: on Windows the OptionMenu
+        # menubutton renders as a themed gray box that swallows the styling (and
+        # sometimes the text). The clam theme is the one that honors dark colors.
+        style = ttk.Style(root)
+        style.theme_use('clam')
+        style.configure('Dark.TCombobox', fieldbackground=CARD, background=CARD,
+                        foreground=FG, arrowcolor=FG, bordercolor=CARD,
+                        lightcolor=CARD, darkcolor=CARD, insertcolor=FG)
+        style.map('Dark.TCombobox',
+                  fieldbackground=[('readonly', CARD)],
+                  foreground=[('readonly', FG)],
+                  selectbackground=[('readonly', CARD)],
+                  selectforeground=[('readonly', FG)])
+        root.option_add('*TCombobox*Listbox.background', CARD)
+        root.option_add('*TCombobox*Listbox.foreground', FG)
+        root.option_add('*TCombobox*Listbox.selectBackground', '#3a3a3a')
+        root.option_add('*TCombobox*Listbox.selectForeground', FG)
+        dropdown = ttk.Combobox(root, textvariable=adapter_var, state='readonly',
+                                values=[label for label, _ in adapter_options],
+                                style='Dark.TCombobox', font=("Segoe UI", 9))
+        dropdown.pack(padx=24, fill="x", ipady=2)
+
         feedback = tk.Label(root, text="", fg=MUTED, bg=BG, wraplength=380,
                             justify="center", font=("Segoe UI", 9))
         feedback.pack(pady=(6, 10), padx=24)
 
         status_lbl = tk.Label(root, text="", bg=BG, font=("Segoe UI", 12, "bold"))
         status_lbl.pack(pady=(2, 2))
-        # Problem details; packed/unpacked dynamically by _refresh_status
-        detail = tk.Label(root, text="", fg=FG, bg=CARD, wraplength=380,
-                          justify="left", font=("Segoe UI", 9), padx=10, pady=8)
+        # Problem details; packed/unpacked dynamically by refresh_status. A disabled
+        # Text (not a Label) so the message - e.g. the netsh fix command - can be
+        # selected and copied.
+        detail = tk.Text(root, bg=CARD, fg=FG, wrap="word", relief="flat", bd=0,
+                         highlightthickness=0, font=("Segoe UI", 9), width=54, height=3,
+                         padx=10, pady=8, state="disabled", cursor="arrow")
+        add_copy_menu(detail, lambda: detail.get("1.0", "end-1c"))
+
+        def set_detail(msg):
+            """Replace the detail text and grow the widget to fit it."""
+            detail.config(state="normal")
+            detail.delete("1.0", "end")
+            detail.insert("1.0", msg)
+            detail.config(state="disabled")
+            # Estimate wrapped lines from text length; Text.count('displaylines')
+            # is unreliable before the widget is mapped (counts ~1 char per line).
+            lines = sum(max(1, len(line) // 52 + 1) for line in (msg.splitlines() or ['']))
+            detail.config(height=max(2, min(lines + 1, 14)))
 
         close_btn = tk.Button(root, text="Close", command=root.destroy, bg="#3a3a3a", fg=FG,
                               relief="flat", padx=18, pady=6, cursor="hand2")
+
+        last = {'detail': None}
 
         def refresh_status():
             state, msg = mdns_service.status()
@@ -301,11 +381,21 @@ class TrayManager:
             else:
                 status_lbl.config(text="Problem", fg=ERR_RED)
             if state == 'problem' and msg:
-                detail.config(text=msg)
+                if msg != last['detail']:  # don't wipe the user's selection every tick
+                    last['detail'] = msg
+                    set_detail(msg)
                 detail.pack(pady=(4, 4), padx=24, fill="x", before=close_btn)
             else:
+                last['detail'] = None
                 detail.pack_forget()
-            url_var.set(mdns_service.url(self.port))
+            # Setting a textvariable clears any selection; only update on change
+            new_url = mdns_service.url(self.port)
+            if url_var.get() != new_url:
+                url_var.set(new_url)
+            ip = mdns_service.advertised_ip()
+            new_ip = f"resolves to {ip}" if ip else "not advertising"
+            if ip_var.get() != new_ip:
+                ip_var.set(new_ip)
             root.after(1000, refresh_status)
 
         save_result = []  # set_hostname blocks ~1-2s (re-registration); run off the UI thread
@@ -320,10 +410,12 @@ class TrayManager:
 
         def do_save():
             prefix = entry.get()
+            adapter_choice = adapter_lookup.get(adapter_var.get())
             save_btn.config(state="disabled")
             feedback.config(text="Saving...", fg=MUTED)
-            threading.Thread(target=lambda: save_result.append(mdns_service.set_hostname(prefix)),
-                             daemon=True).start()
+            threading.Thread(
+                target=lambda: save_result.append(mdns_service.set_settings(prefix, adapter_choice)),
+                daemon=True).start()
             poll_save()
 
         save_btn = tk.Button(row, text="Save", command=do_save, bg="#3a3a3a", fg=FG,

@@ -5,8 +5,12 @@ DNS-SD service via python-zeroconf, which then answers A queries for the name
 from any device on the LAN. Combined with the server preferring port 80, this
 makes the app reachable at plain http://clip.local/.
 
-The prefix is user-configurable (tray menu > mDNS) and persisted in
-mdns_config.json next to the other runtime config files.
+The prefix and the source adapter are user-configurable (tray menu > mDNS)
+and persisted in mdns_config.json next to the other runtime config files.
+Only ONE adapter's IPv4 is advertised: machines routinely carry virtual
+adapters (VirtualBox/VMware host-only, hotspot/ICS, VPN) whose addresses are
+unreachable from the LAN, and a client that picks such an A record fails to
+connect. Default is the primary adapter (the one holding the default route).
 
 Degrades to a no-op when the zeroconf package is missing or registration
 fails, so the app never hard-depends on it.
@@ -37,6 +41,8 @@ _port = None
 _start_error = None
 _atexit_registered = False
 _reach_warnings = None  # None = self-check still running; [] = no issues found
+_advertised_ip = None   # the single IPv4 the name currently resolves to
+_advert_note = None     # set when the configured adapter was unavailable (fallback)
 
 
 def _valid_hostname(name):
@@ -44,23 +50,88 @@ def _valid_hostname(name):
     return bool(re.fullmatch(r'[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?', name or ''))
 
 
-def _load_hostname():
+def _load_config():
+    """Returns (hostname, adapter). adapter is an adapter description (or the
+    bare IP for adapters the OS can't name); None means auto (primary)."""
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            name = (json.load(f).get('hostname') or '').strip().lower()
-        if _valid_hostname(name):
-            return name
+            data = json.load(f)
     except Exception:
-        pass
-    return DEFAULT_HOSTNAME
+        data = {}
+    name = (data.get('hostname') or '').strip().lower()
+    if not _valid_hostname(name):
+        name = DEFAULT_HOSTNAME
+    return name, (data.get('adapter') or None)
 
 
-_hostname = _load_hostname()
+_hostname, _adapter = _load_config()
+
+
+def _save_config():
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'hostname': _hostname, 'adapter': _adapter}, f)
+    except Exception as e:
+        print(f"[mDNS] Could not save {CONFIG_FILE}: {e}")
 
 
 def hostname():
     """The current mDNS prefix, e.g. 'clip' for clip.local."""
     return _hostname
+
+
+def adapter():
+    """The configured source adapter (description or IP), None = auto."""
+    return _adapter
+
+
+def advertised_ip():
+    """The single IPv4 the name currently resolves to (None when inactive)."""
+    return _advertised_ip
+
+
+def available_adapters():
+    """[(display_label, value), ...] for the settings UI; first entry is Auto.
+
+    `value` is the adapter description when the OS provides one (stable across
+    DHCP renewals), else the bare IP; None stands for auto (primary adapter).
+    """
+    try:
+        names = net_utils.get_adapter_names()
+    except Exception:
+        names = {}
+    options = [("Auto (primary adapter)", None)]
+    # include_virtual: a VM/VPN adapter is rarely the right answer, but the point
+    # of this list is to let the user override when it is.
+    for ip, version in net_utils.get_host_ips(include_virtual=True):
+        if version != 'IPv4' or ip == '127.0.0.1':
+            continue
+        desc = names.get(ip)
+        options.append((f"{desc} ({ip})" if desc else ip, desc or ip))
+    return options
+
+
+def _pick_address():
+    """(ip, note): the single IPv4 to advertise. Honors the configured adapter,
+    falling back to the primary (default-route) adapter when it has no IP."""
+    # get_host_ips orders best-first (default route, then real adapters, then
+    # virtual ones), so ipv4s[0] is the right automatic choice and the right
+    # fallback when a configured adapter has gone away.
+    ipv4s = [ip for ip, v in net_utils.get_host_ips(include_virtual=True)
+             if v == "IPv4" and ip != "127.0.0.1"]
+    if not ipv4s:
+        return None, None
+    if _adapter:
+        try:
+            names = net_utils.get_adapter_names()
+        except Exception:
+            names = {}
+        for ip in ipv4s:
+            if _adapter in (names.get(ip), ip):
+                return ip, None
+        return ipv4s[0], (f"The configured adapter '{_adapter}' has no active IP right now - "
+                          f"advertising the primary adapter ({ipv4s[0]}) instead.")
+    return ipv4s[0], None  # get_host_ips puts the default-route IP first
 
 
 def url(port):
@@ -80,38 +151,35 @@ def status():
     if w is None:
         return 'checking', "Checking firewall / network configuration..."
     if w:
-        return 'problem', w[0]
+        return 'problem', "\n\n".join(w)
     return 'ok', ""
 
 
-def set_hostname(prefix):
-    """Validate and persist a new mDNS prefix; re-advertise live if active.
+def set_settings(prefix, adapter_choice):
+    """Validate and persist prefix + source adapter; re-advertise live if active.
 
+    adapter_choice: a value from available_adapters() (None = auto).
     Returns (ok, message). Blocks for the mDNS re-registration probe (~1-2 s)
     when the responder is running, so call it off the UI thread.
     """
-    global _hostname
+    global _hostname, _adapter
     prefix = (prefix or '').strip().lower()
     if not _valid_hostname(prefix):
         return False, ("Invalid name: use 1-63 letters, digits or hyphens "
                        "(no spaces, no leading/trailing hyphen).")
-    if prefix == _hostname:
-        return True, "Name unchanged."
+    if prefix == _hostname and adapter_choice == _adapter:
+        return True, "Settings unchanged."
 
     was_active = is_active()
     if was_active:
         stop()
-    _hostname = prefix
-    try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump({'hostname': prefix}, f)
-    except Exception as e:
-        print(f"[mDNS] Could not save {CONFIG_FILE}: {e}")
+    _hostname, _adapter = prefix, adapter_choice
+    _save_config()
 
     if was_active and _port is not None:
         if not start(_port):
             return False, f"Saved, but re-advertising {prefix}.local failed."
-        return True, f"Saved. Advertising {url(_port)}"
+        return True, f"Saved. Advertising {url(_port)} -> {_advertised_ip}"
     return True, "Saved."
 
 
@@ -229,6 +297,9 @@ def _check_reachability():
     except Exception as e:
         print(f"[mDNS] Reachability self-check failed: {e}")
         warnings = []
+    if _advert_note:
+        # Surface the adapter fallback in the settings popup as well
+        warnings = [_advert_note] + warnings
     _reach_warnings = warnings
     for w in warnings:
         print(f"[mDNS] WARNING: {w}")
@@ -242,6 +313,7 @@ def start(port):
     queries (the standard first-run firewall prompt covers this).
     """
     global _zeroconf, _info, _port, _start_error, _atexit_registered
+    global _advertised_ip, _advert_note
     _port = port
     try:
         from zeroconf import ServiceInfo, Zeroconf
@@ -250,17 +322,17 @@ def start(port):
         print(f"[mDNS] {_start_error}")
         return False
 
-    addresses = []
-    for ip, version in net_utils.get_host_ips():
-        if version == "IPv4" and ip != "127.0.0.1":
-            try:
-                addresses.append(socket.inet_pton(socket.AF_INET, ip))
-            except OSError:
-                pass
+    ip, note = _pick_address()
+    try:
+        addresses = [socket.inet_pton(socket.AF_INET, ip)] if ip else []
+    except OSError:
+        addresses = []
     if not addresses:
         _start_error = f"No LAN IPv4 address found - {_hostname}.local is disabled."
         print(f"[mDNS] {_start_error}")
         return False
+    if note:
+        print(f"[mDNS] {note}")
 
     with _lock:
         if _zeroconf is not None:
@@ -282,11 +354,12 @@ def start(port):
             return False
         _zeroconf, _info = zc, info
         _start_error = None
+        _advertised_ip, _advert_note = ip, note
 
     if not _atexit_registered:
         atexit.register(stop)
         _atexit_registered = True
-    print(f"[mDNS] Advertising {url(port)}")
+    print(f"[mDNS] Advertising {url(port)} -> {ip}")
     # Registration only proves we bound the socket; whether OTHER devices can
     # query us depends on the OS firewall. Check in the background (the COM /
     # subprocess probes can take a few seconds) and report what to fix.
@@ -301,10 +374,11 @@ def stop():
     os._exit(), which skips atexit hooks — without the goodbye packets the
     stale name would linger in peers' mDNS caches.
     """
-    global _zeroconf, _info
+    global _zeroconf, _info, _advertised_ip
     with _lock:
         zc, info = _zeroconf, _info
         _zeroconf = _info = None
+        _advertised_ip = None
     if zc is None:
         return
     try:
