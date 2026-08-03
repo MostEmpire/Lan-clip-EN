@@ -261,7 +261,12 @@ class TrayManager:
                      wraplength=280, justify="center").pack(pady=20, padx=20)
         for url, label, ip in entries:
             try:
-                photo = ImageTk.PhotoImage(self._qr_pil_image(url))
+                # master=root is required, not cosmetic: without it the image is
+                # created in tkinter's *default* interpreter, which is whichever
+                # window opened first. With the mDNS window already open, the
+                # labels below would then fail with 'image "pyimage1" doesn't
+                # exist' and this whole window would never finish building.
+                photo = ImageTk.PhotoImage(self._qr_pil_image(url), master=root)
             except Exception as e:
                 print(f"Failed to render QR for {url}: {e}")
                 continue
