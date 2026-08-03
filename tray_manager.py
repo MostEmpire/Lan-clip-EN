@@ -242,8 +242,11 @@ class TrayManager:
     def _show_mdns_settings(self, icon, item):
         """Open the mDNS settings popup (centered). Same single-window threading
         pattern as the QR popup: pystray owns the main thread, Tk gets its own."""
+        import mdns_service
+
         if getattr(self, '_mdns_thread', None) and self._mdns_thread.is_alive():
             return  # already open
+        mdns_service.recheck()  # verify now, so the verdict on screen is current
         self._mdns_thread = threading.Thread(target=self._mdns_window_worker, daemon=True)
         self._mdns_thread.start()
 
