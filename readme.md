@@ -70,6 +70,9 @@ python app.py --tray # clipboard monitoring mode
 ```
 
 ## Changelog
+2026-08-03
+- Fixed mDNS Discovery problem where the app advertised only to one adapter (may not have been the one in use)
+
 2026-07-07
 - The application now runs in tray mode by default (trust increase)
 - Added mDNS feature to the application, so that other users on the network can more easily connect to the web interface
