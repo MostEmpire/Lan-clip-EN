@@ -9,5 +9,6 @@ pyperclip
 requests
 pywin32 ; sys_platform == 'win32'
 zeroconf
+cryptography
 # Adapter enumeration on POSIX; Windows uses GetAdaptersAddresses via ctypes instead
 psutil ; sys_platform != 'win32'

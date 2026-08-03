@@ -110,19 +110,33 @@ class TrayManager:
     def _build_server_urls(self):
         """Return [(url, label, ip), ...] for every active adapter. `label` is the
         real adapter name when the OS can provide it (e.g. 'Intel(R) Wireless-AC
-        9560'), otherwise a generic '<IPv4/IPv6> adapter' fallback."""
+        9560'), otherwise a generic '<IPv4/IPv6> adapter' fallback.
+
+        HTTPS addresses are listed first: browsers only allow one-click copy and
+        paste in a secure context, so that's what a phone wants. The plain HTTP
+        entries stay below for devices that would rather skip the certificate
+        warning (the app's CA can be installed from /ca.crt to remove it)."""
         import net_utils
         import mdns_service
+        import tls_service
         try:
             names = net_utils.get_adapter_names()
         except Exception:
             names = {}
+        mdns_host = f"{mdns_service.hostname()}.local" if mdns_service.is_active() else None
+        ips = net_utils.get_host_ips()
         entries = []
-        if mdns_service.is_active():
+        if tls_service.is_active():
+            if mdns_host:
+                entries.append((tls_service.url(mdns_host),
+                                "HTTPS - mDNS name (may not work on Android)", mdns_host))
+            for ip, version in ips:
+                url = tls_service.url(ip, ipv6=(version == 'IPv6'))
+                entries.append((url, f"HTTPS - {names.get(ip) or version + ' adapter'}", ip))
+        if mdns_host:
             entries.append((mdns_service.url(self.port),
-                            "mDNS name (may not work on Android)",
-                            f"{mdns_service.hostname()}.local"))
-        for ip, version in net_utils.get_host_ips():
+                            "mDNS name (may not work on Android)", mdns_host))
+        for ip, version in ips:
             url = net_utils.format_url(ip, self.port, ipv6=(version == 'IPv6'))
             label = names.get(ip) or f"{version} adapter"
             entries.append((url, label, ip))
