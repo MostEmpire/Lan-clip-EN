@@ -8,3 +8,6 @@ __pycache__/
 *.zip
 lan-clip-deploy.tar
 .venv/
+
+# HTTPS: the app issues its own certificate authority; the key stays local
+certs/

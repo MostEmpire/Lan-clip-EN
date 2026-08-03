@@ -16,6 +16,7 @@ import json
 import random
 import net_utils
 import mdns_service
+import tls_service
 if sys.platform == 'darwin':
     import tray_manager_mac as tray_manager
 else:
@@ -500,6 +501,20 @@ def uploaded_file(filename):
     uploads_dir = os.path.join(get_app_path(), 'uploads')
     return send_from_directory(uploads_dir, filename)
 
+@app.route('/ca.crt')
+def download_ca_certificate():
+    """Hand out this app's certificate authority so a device can trust the HTTPS
+    endpoint for good - installing it once survives every later reissue of the
+    server certificate. Reachable over plain HTTP as well, since a device that
+    does not trust us yet still has to be able to fetch it. Served inline with
+    the x509 MIME type, which is what makes iOS offer to install it."""
+    path = tls_service.ca_path()
+    if not path:
+        return 'HTTPS is not enabled on this server', 404
+    log_action("DOWNLOAD_CA", "")
+    return send_file(path, mimetype='application/x-x509-ca-cert',
+                     as_attachment=False, download_name='lan-clip-ca.crt')
+
 @app.route('/api/verify_password', methods=['POST'])
 def verify_password_api():
     data = request.json
@@ -879,6 +894,8 @@ if __name__ == '__main__':
                         help=f'Port number to run the app on (default: 80 if free, otherwise {port}).')
     parser.add_argument('--tray', action='store_true', help='Enable system tray mode')
     parser.add_argument('--no-tray', action='store_true', help='Disable system tray mode (run the web server only)')
+    parser.add_argument('--no-https', action='store_true',
+                        help='Serve plain HTTP only (skip the self-issued certificate and the TLS port)')
     args = parser.parse_args()
 
     if args.port is not None:
@@ -897,10 +914,45 @@ if __name__ == '__main__':
 
     from waitress import serve
 
+    def start_https(mdns_active):
+        """Serve the same app over TLS as well; returns ([https urls], ca_url).
+
+        waitress has no TLS support, so a loopback-only waitress instance does
+        the WSGI work (told url_scheme='https', so Flask sees a secure request)
+        and tls_service terminates TLS in front of it. Phones need this: browsers
+        only expose the clipboard API in a secure context.
+        """
+        internal = net_utils.pick_free_loopback_port()
+        try:
+            from waitress import create_server
+            internal_server = create_server(app, host='127.0.0.1', port=internal,
+                                            url_scheme='https')
+        except Exception as e:
+            print(f"[HTTPS] Could not start the internal server: {e}")
+            return [], None
+        threading.Thread(target=internal_server.run, daemon=True).start()
+
+        if not tls_service.start(internal):
+            return [], None
+
+        urls = []
+        if mdns_active:
+            urls.append(tls_service.url(f"{mdns_service.hostname()}.local"))
+        ips = net_utils.get_host_ips()
+        for ip, version in ips:
+            urls.append(tls_service.url(ip, ipv6=(version == 'IPv6')))
+        # The CA link has to be plain HTTP: a device that doesn't trust us yet
+        # cannot be asked to fetch it over the connection it doesn't trust.
+        ca_host = ips[0][0] if ips else '127.0.0.1'
+        return urls, net_utils.format_url(ca_host, port) + '/ca.crt'
+
     def start_server():
         print(f"Server running on {net_utils.format_url('localhost', port)}")
         mdns_active = mdns_service.start(port)
-        net_utils.display_server_info(port, mdns_url=mdns_service.url(port) if mdns_active else None)
+        https_urls, ca_url = ([], None) if args.no_https else start_https(mdns_active)
+        net_utils.display_server_info(port,
+                                      mdns_url=mdns_service.url(port) if mdns_active else None,
+                                      https_urls=https_urls, ca_url=ca_url)
         serve(app, host="0.0.0.0", port=port)
 
     if use_tray:

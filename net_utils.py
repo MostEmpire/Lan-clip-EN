@@ -24,10 +24,13 @@ VIRTUAL_SUBNET_HINTS = (
     '10.211.55.', '10.37.129.',                     # Parallels
 )
 
-def format_url(host, port, ipv6=False):
-    """Build an http:// URL, omitting the port when it's the HTTP default (80)."""
+def format_url(host, port, ipv6=False, scheme='http'):
+    """Build a URL, omitting the port when it's the default for the scheme."""
     hostpart = f"[{host}]" if ipv6 else host
-    return f"http://{hostpart}" if port == 80 else f"http://{hostpart}:{port}"
+    default_port = 443 if scheme == 'https' else 80
+    if port == default_port:
+        return f"{scheme}://{hostpart}"
+    return f"{scheme}://{hostpart}:{port}"
 
 def pick_server_port(fallback, preferred=80):
     """Return `preferred` if this machine can bind it on all interfaces, else `fallback`.
@@ -44,6 +47,15 @@ def pick_server_port(fallback, preferred=80):
         return preferred
     except OSError:
         return fallback
+
+def pick_free_loopback_port():
+    """An unused port on 127.0.0.1, for a server no one outside this machine talks to."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
 
 def _windows_interfaces():
     """Windows: [(ip, version, adapter_description, is_up)] via GetAdaptersAddresses.
@@ -297,7 +309,7 @@ def get_host_ips(include_virtual=False):
         ips = [("127.0.0.1", "IPv4")]
     return ips
 
-def display_server_info(port, mdns_url=None):
+def display_server_info(port, mdns_url=None, https_urls=None, ca_url=None):
     """Display the access URL and QR code in the terminal"""
     ips = get_host_ips()
 
@@ -327,5 +339,23 @@ def display_server_info(port, mdns_url=None):
             qr.print_ascii(invert=True)
         except Exception as e:
             print(f"  [!] Unable to generate QR code: {e}")
-    
+
+    if https_urls:
+        # Phones need HTTPS for one-click copy/paste: browsers only expose the
+        # clipboard API in a secure context (HTTPS, or localhost).
+        print("\n▶ [HTTPS] Secure access URLs (needed for clipboard access on phones):")
+        for u in https_urls:
+            print(f"    {u}")
+        if ca_url:
+            print("  The certificate is issued by this app, so browsers warn once. To get rid of")
+            print(f"  the warning, install the certificate authority from {ca_url}")
+        print("  Scan to open the secure address:")
+        try:
+            qr = qrcode.QRCode(version=1, box_size=1, border=1)
+            qr.add_data(https_urls[0])
+            qr.make(fit=True)
+            qr.print_ascii(invert=True)
+        except Exception as e:
+            print(f"  [!] Unable to generate QR code: {e}")
+
     print("\n" + "═"*62 + "\n")
