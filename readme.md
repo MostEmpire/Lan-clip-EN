@@ -71,6 +71,7 @@ python app.py --tray # clipboard monitoring mode
 
 ## Changelog
 2026-08-03
+- Fixed a problem for macOS, where mDNS window was not usable.
 - Fixed mDNS Discovery problem where the app advertised only to one adapter (may not have been the one in use)
 
 2026-07-07
