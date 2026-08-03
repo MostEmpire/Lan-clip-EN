@@ -866,6 +866,14 @@ def _auto_delete_worker():
 threading.Thread(target=_auto_delete_worker, daemon=True).start()
 
 if __name__ == '__main__':
+    # The startup banner/QR codes use Unicode box characters; on consoles/pipes
+    # with a legacy codepage (e.g. cp1250) printing them raises UnicodeEncodeError,
+    # which would kill the server thread. Degrade to '?' instead of crashing.
+    try:
+        sys.stdout.reconfigure(errors='replace')
+    except Exception:
+        pass  # stdout may be absent (windowed build) or not reconfigurable
+
     parser = argparse.ArgumentParser(description='Run the LAN clipboard app.')
     parser.add_argument('--port', type=int, default=None,
                         help=f'Port number to run the app on (default: 80 if free, otherwise {port}).')
