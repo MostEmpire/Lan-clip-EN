@@ -98,12 +98,78 @@ class TrayManager:
         import net_utils
         webbrowser.open(net_utils.format_url('127.0.0.1', self.port))
 
+    @staticmethod
+    def _claim_foreground(window):
+        """Windows only: try to make `window` the foreground one; True if allowed.
+
+        A tray app has no foreground rights, so SetForegroundWindow is normally
+        refused. Briefly sharing the input queue of the thread that owns the
+        current foreground window is the documented way to ask properly - it
+        still fails against some windows, hence the return value.
+        """
+        import ctypes
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+        try:
+            frame = user32.GetAncestor(window.winfo_id(), 2)  # GA_ROOT
+            ours = kernel32.GetCurrentThreadId()
+            theirs = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
+            attached = bool(theirs and theirs != ours
+                            and user32.AttachThreadInput(theirs, ours, True))
+            user32.SetForegroundWindow(frame)
+            if attached:
+                user32.AttachThreadInput(theirs, ours, False)
+            return user32.GetForegroundWindow() == frame
+        except Exception:
+            return False
+
+    @staticmethod
+    def _bring_to_front(window):
+        """Raise a Tk window above the others, so a repeated menu click is visible.
+
+        lift() alone does nothing for a tray app hidden behind a maximized window:
+        Windows refuses to hand the foreground to a process the user didn't click.
+        Going topmost always works, so the window is pinned first and only
+        unpinned once it is genuinely in front - either because Windows allowed
+        the focus change, or because the user clicked it. Unpinning
+        unconditionally (say, on a timer) is what makes it sink straight back
+        behind the window it was supposed to escape.
+        """
+        try:
+            window.deiconify()  # also restores it if the user minimized it
+            window.lift()
+            window.attributes("-topmost", True)
+            window.focus_force()
+        except Exception:
+            return  # the window was closed between the click and this call
+
+        def unpin(_event=None):
+            try:
+                window.attributes("-topmost", False)
+            except Exception:
+                pass
+
+        if sys.platform != 'win32' or TrayManager._claim_foreground(window):
+            window.after(400, unpin)  # we're in front for real; stop being sticky
+        else:
+            # Focus was refused, so staying on top is the only thing keeping the
+            # window visible. Let it go as soon as the user actually clicks it.
+            window.bind("<FocusIn>", unpin, add=True)
+
     def _show_qr_codes(self, icon, item):
         """Open a popup listing a QR code per active network adapter so phones can
         scan the right address. Runs the Tk window in its own thread because pystray
-        owns the main thread; a single window is kept at a time."""
+        owns the main thread; a single window is kept at a time.
+
+        Clicking the menu item while that window already exists raises it instead
+        of doing nothing: it may well be buried behind other windows, and a menu
+        item that appears dead is worse than no menu item.
+        """
         if getattr(self, '_qr_thread', None) and self._qr_thread.is_alive():
-            return  # already open
+            self._qr_raise.set()  # its own thread picks this up and surfaces it
+            return
+        # Tk is not thread-safe, so the raise is requested by flag and carried out
+        # by the thread that owns the window (see the poll in _qr_window_worker).
+        self._qr_raise = threading.Event()
         self._qr_thread = threading.Thread(target=self._qr_window_worker, daemon=True)
         self._qr_thread.start()
 
@@ -242,9 +308,16 @@ class TrayManager:
             x = max(0, (root.winfo_screenwidth() - root.winfo_width()) // 2)
             y = max(0, (sh - root.winfo_height()) // 2)
             root.geometry(f"+{x}+{y}")
-        root.lift()
-        root.attributes("-topmost", True)
-        root.after(400, lambda: root.attributes("-topmost", False))
+        self._bring_to_front(root)
+
+        def poll_raise():
+            """Surface the window when the tray menu item is clicked again."""
+            if self._qr_raise.is_set():
+                self._qr_raise.clear()
+                self._bring_to_front(root)
+            root.after(200, poll_raise)
+
+        root.after(200, poll_raise)
         try:
             root.mainloop()
         finally:
@@ -259,8 +332,10 @@ class TrayManager:
         import mdns_service
 
         if getattr(self, '_mdns_thread', None) and self._mdns_thread.is_alive():
-            return  # already open
+            self._mdns_raise.set()  # already open, but possibly buried - surface it
+            return
         mdns_service.recheck()  # verify now, so the verdict on screen is current
+        self._mdns_raise = threading.Event()
         self._mdns_thread = threading.Thread(target=self._mdns_window_worker, daemon=True)
         self._mdns_thread.start()
 
@@ -449,10 +524,16 @@ class TrayManager:
         x = max(0, (root.winfo_screenwidth() - root.winfo_reqwidth()) // 2)
         y = max(0, (root.winfo_screenheight() - root.winfo_reqheight()) // 2)
         root.geometry(f"+{x}+{y}")
-        root.deiconify()
-        root.lift()
-        root.attributes("-topmost", True)
-        root.after(400, lambda: root.attributes("-topmost", False))
+        self._bring_to_front(root)
+
+        def poll_raise():
+            """Surface the window when the tray menu item is clicked again."""
+            if self._mdns_raise.is_set():
+                self._mdns_raise.clear()
+                self._bring_to_front(root)
+            root.after(200, poll_raise)
+
+        root.after(200, poll_raise)
         root.mainloop()
 
     def _open_folder(self, folder_name):
