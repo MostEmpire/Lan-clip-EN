@@ -20,6 +20,7 @@ try:
     from pystray import MenuItem as item, Menu
 except ImportError as e:
     print(f"Tray unavailable ({e}). Install with: pip3 install pystray pyobjc-framework-Cocoa")
+    AppKit = None
     pystray = None
     item = None
     Menu = None
@@ -115,6 +116,92 @@ class TrayManager:
         import net_utils
         webbrowser.open(net_utils.format_url('127.0.0.1', self.port))
 
+    def _show_mdns_settings(self, icon, item):
+        """Open the mDNS settings dialog.
+
+        Cocoa rather than Tk: on macOS every UI call must happen on the main
+        thread, and pystray already owns it with the AppKit run loop, so the
+        Windows approach (a Tk window in a side thread) would crash here. The
+        work is queued onto the main queue so it runs on the right thread no
+        matter which thread pystray dispatched the menu action on.
+        """
+        if AppKit is None:
+            print("mDNS settings need AppKit (pip3 install pyobjc-framework-Cocoa)")
+            return
+        AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(self._mdns_dialog)
+
+    def _mdns_status_text(self, mdns_service, notice=None):
+        """The dialog body: address, what it resolves to, and the verdict."""
+        state, detail = mdns_service.status()
+        lines = []
+        if notice:
+            lines += [notice, ""]
+        lines.append(mdns_service.url(self.port))
+        ip = mdns_service.advertised_ip()
+        lines.append(f"resolves to {ip}" if ip else "not advertising")
+        lines.append("")
+        lines.append({'ok': "All OK", 'checking': "Checking..."}.get(state, "Problem"))
+        if state == 'problem' and detail:
+            lines.append(detail)
+        return "\n".join(lines)
+
+    def _mdns_dialog(self):
+        import mdns_service
+
+        notice = None
+        try:
+            while True:
+                adapters = mdns_service.available_adapters()  # [(label, value), ...]
+                alert = AppKit.NSAlert.alloc().init()
+                alert.setMessageText_("Lan-clip - mDNS")
+                alert.setInformativeText_(self._mdns_status_text(mdns_service, notice))
+                alert.addButtonWithTitle_("Save")
+                alert.addButtonWithTitle_("Re-check")
+                alert.addButtonWithTitle_("Close")
+
+                # Frames as ((x, y), (w, h)) tuples: pyobjc converts those to NSRect,
+                # so this doesn't depend on NSMakeRect being re-exported by AppKit.
+                view = AppKit.NSView.alloc().initWithFrame_(((0, 0), (380, 76)))
+                name_field = AppKit.NSTextField.alloc().initWithFrame_(((0, 46), (180, 24)))
+                name_field.setStringValue_(mdns_service.hostname())
+                suffix = AppKit.NSTextField.alloc().initWithFrame_(((186, 50), (80, 18)))
+                suffix.setStringValue_(".local")
+                suffix.setBezeled_(False)
+                suffix.setDrawsBackground_(False)
+                suffix.setEditable_(False)
+                suffix.setSelectable_(False)
+                popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                    ((0, 8), (380, 26)), False)
+                current = mdns_service.adapter()
+                for index, (label, value) in enumerate(adapters):
+                    popup.addItemWithTitle_(label)
+                    if value == current:
+                        popup.selectItemAtIndex_(index)
+                view.addSubview_(name_field)
+                view.addSubview_(suffix)
+                view.addSubview_(popup)
+                alert.setAccessoryView_(view)
+                alert.window().setInitialFirstResponder_(name_field)
+
+                # Accessory apps (setActivationPolicy_(1)) are not frontmost, so the
+                # dialog would otherwise open behind whatever the user is looking at.
+                AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                response = alert.runModal()
+
+                if response == AppKit.NSAlertFirstButtonReturn:      # Save
+                    chosen = popup.indexOfSelectedItem()
+                    value = adapters[chosen][1] if 0 <= chosen < len(adapters) else None
+                    # Blocks ~1-2s on the mDNS re-registration probe; the dialog is
+                    # already dismissed at this point, so nothing looks frozen.
+                    _ok, notice = mdns_service.set_settings(str(name_field.stringValue()), value)
+                elif response == AppKit.NSAlertSecondButtonReturn:   # Re-check
+                    mdns_service.recheck()
+                    notice = "Re-checking..."
+                else:
+                    return
+        except Exception as e:
+            print(f"mDNS settings dialog failed: {e}")
+
     def _toggle_listener(self, icon, item):
         self._listener_enabled = not self._listener_enabled
         if self._listener_enabled:
@@ -164,6 +251,7 @@ class TrayManager:
         # 3. Main menu
         menu = Menu(
             item('Open browser', self._open_browser),
+            item('mDNS', self._show_mdns_settings),
             item('Browse local files', folder_menu),
             pystray.Menu.SEPARATOR,
             item('Listening mode (on/off)', self._toggle_listener, checked=lambda _: self._listener_enabled),
