@@ -71,6 +71,8 @@ python app.py --tray # clipboard monitoring mode
 
 ## Changelog
 2026-08-03
+- Version 1.2.0
+- Fixed mDNS and QR-Codes window staying behind other windows when the user tries to open them again thrugh the tray
 - Implemented https support into the application
 - Fixed UnicodeEncodeError occurring when banner message was printed in the console
 - Fixed a problem for macOS, where mDNS window was not usable
