@@ -71,8 +71,14 @@ python app.py --tray # clipboard monitoring mode
 
 ## Changelog
 2026-08-14
+- Fixed an issue of reporting a block rule that belongs to a network profile that isn't in use.
 - Added a quick Fix firewall button that runs a series of elevated scripts that configure the firewall for the user
 - Fixed a problem where mDNS or QR-code window open could crash the application
+
+2026-08-09
+- Fixed the application aborting at random while the QR-codes or mDNS window was in use, caused by a closed window's Tk interpreter being freed by an unrelated background thread
+- Added a "Fix firewall" button to the mDNS window that asks the OS for the rules the app needs (UAC on Windows, the authentication sheet on macOS, polkit on Linux)
+- Fixed the mDNS window reporting a firewall problem because of a rule belonging to a network profile that was not in use
 
 2026-08-03
 - Version 1.2.0

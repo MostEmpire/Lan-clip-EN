@@ -444,6 +444,13 @@ def _windows_firewall_warnings():
         try:
             if not rule.Enabled or rule.Direction != DIR_IN:
                 continue
+            # A rule only has any effect on the profile(s) it is scoped to. Without
+            # this test a leftover BLOCK rule for, say, the Public profile would be
+            # reported while the machine sits on a Private network where an allow
+            # rule is in force - a warning the user cannot clear by adding rules.
+            # 0x7fffffff is the "all profiles" mask.
+            if rule.Profiles != 0x7fffffff and not (rule.Profiles & active):
+                continue
             if os.path.normcase(rule.ApplicationName or '') != exe_cmp:
                 continue
             if rule.Protocol not in (UDP, ANY_PROTOCOL):
@@ -458,16 +465,16 @@ def _windows_firewall_warnings():
             continue  # some rules expose partial COM properties
 
     if block:
-        return [f"Windows Firewall has an inbound BLOCK rule for this program ({exe}) - "
-                "probably from clicking 'Cancel' on the connection prompt. Other devices cannot "
-                f"resolve {_hostname}.local or reach the app. Fix: Windows Security > Firewall & "
-                "network protection > Allow an app through firewall > tick this program (all "
-                "profiles), or delete its block rules."]
+        return [f"Windows Firewall has an inbound BLOCK rule for this program ({exe}) on the "
+                "active network profile - probably from clicking 'Cancel' on the connection "
+                "prompt. A block always beats an allow, so adding more rules will not help: the "
+                f"block has to go. Other devices cannot resolve {_hostname}.local or reach the "
+                "app. Use the 'Fix firewall' button below, or remove the block rules under "
+                "Windows Security > Firewall & network protection > Advanced settings."]
     if not allow:
-        return [f"No inbound Windows Firewall rule found for this program ({exe}). Windows should "
-                "show a permission prompt on first run - click 'Allow'. To pre-authorize from an "
-                'admin console: netsh advfirewall firewall add rule name="Lan-clip mDNS" dir=in '
-                f'action=allow protocol=UDP localport=5353 program="{exe}"']
+        return [f"No inbound Windows Firewall rule found for this program ({exe}) on the active "
+                "network profile. Windows should show a permission prompt on first run - click "
+                "'Allow'. If it never appeared, use the 'Fix firewall' button below."]
     return []
 
 
@@ -487,9 +494,9 @@ def _macos_firewall_warnings():
                 f"resolve {_hostname}.local or reach the app. Disable block-all in System Settings > "
                 "Network > Firewall > Options."]
     if 'blocked' in _out('--getappblocked', exe):
-        return [f"The macOS firewall blocks incoming connections for {exe}. Allow it with: sudo {sf} "
-                f"--add \"{exe}\" && sudo {sf} --unblockapp \"{exe}\" (or System Settings > Network > "
-                "Firewall > Options)."]
+        return [f"The macOS firewall blocks incoming connections for {exe}. Use the 'Fix firewall' "
+                f"button below, or allow it with: sudo {sf} --add \"{exe}\" && sudo {sf} "
+                f"--unblockapp \"{exe}\" (or System Settings > Network > Firewall > Options)."]
     return []
 
 
@@ -504,14 +511,16 @@ def _linux_firewall_warnings():
         r = subprocess.run(['ufw', 'status'], capture_output=True, text=True)
         if r.returncode == 0 and 'status: active' in r.stdout.lower() and '5353' not in r.stdout:
             warnings.append(f"ufw is active with no rule for mDNS - other devices cannot resolve "
-                            f"{_hostname}.local. Allow it with: sudo ufw allow 5353/udp")
+                            f"{_hostname}.local. Use the 'Fix firewall' button below, or allow it "
+                            "with: sudo ufw allow 5353/udp")
     if shutil.which('firewall-cmd'):
         r = subprocess.run(['firewall-cmd', '--query-service=mdns'], capture_output=True, text=True)
         blob = (r.stdout + r.stderr).lower()
         if r.returncode != 0 and 'not running' not in blob and 'no' in blob:
             warnings.append(f"firewalld is active without the mdns service - other devices cannot "
-                            f"resolve {_hostname}.local. Allow it with: sudo firewall-cmd "
-                            "--permanent --add-service=mdns && sudo firewall-cmd --reload")
+                            f"resolve {_hostname}.local. Use the 'Fix firewall' button below, or "
+                            "allow it with: sudo firewall-cmd --permanent --add-service=mdns && "
+                            "sudo firewall-cmd --reload")
     return warnings
 
 
