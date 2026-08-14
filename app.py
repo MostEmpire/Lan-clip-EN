@@ -14,6 +14,7 @@ import time
 import auth_service
 import json
 import random
+import firewall_service
 import net_utils
 import mdns_service
 import tls_service
@@ -881,6 +882,13 @@ def _auto_delete_worker():
 threading.Thread(target=_auto_delete_worker, daemon=True).start()
 
 if __name__ == '__main__':
+    # Elevated firewall helper: this must be the very first thing the process
+    # decides, before any port is picked, any server starts or any tray icon
+    # appears. This copy runs as administrator - it edits the firewall rules and
+    # exits. It must never become a second running instance of the app.
+    if firewall_service.HELPER_FLAG in sys.argv:
+        sys.exit(firewall_service.run_elevated_helper(sys.argv[1:]))
+
     # The startup banner/QR codes use Unicode box characters; on consoles/pipes
     # with a legacy codepage (e.g. cp1250) printing them raises UnicodeEncodeError,
     # which would kill the server thread. Degrade to '?' instead of crashing.

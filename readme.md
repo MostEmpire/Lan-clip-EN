@@ -71,6 +71,7 @@ python app.py --tray # clipboard monitoring mode
 
 ## Changelog
 2026-08-14
+- Added a quick Fix firewall button that runs a series of elevated scripts that configure the firewall for the user
 - Fixed a problem where mDNS or QR-code window open could crash the application
 
 2026-08-03

@@ -372,10 +372,11 @@ class TrayManager:
     def _mdns_window_worker(self):
         try:
             import tkinter as tk
-            from tkinter import ttk
+            from tkinter import messagebox, ttk
         except Exception as e:
             print(f"mDNS window unavailable (tkinter missing): {e}")
             return
+        import firewall_service
         import mdns_service
 
         BG, CARD, FG, ACCENT, MUTED = "#1e1e1e", "#2a2a2a", "#ffffff", "#9fd0ff", "#aaaaaa"
@@ -489,7 +490,10 @@ class TrayManager:
             lines = sum(max(1, len(line) // 52 + 1) for line in (msg.splitlines() or ['']))
             detail.config(height=max(2, min(lines + 1, 14)))
 
-        close_btn = tk.Button(root, text="Close", command=root.destroy, bg="#3a3a3a", fg=FG,
+        btn_row = tk.Frame(root, bg=BG)
+        fix_btn = tk.Button(btn_row, text="Fix firewall", bg="#3a3a3a", fg=FG,
+                            relief="flat", padx=14, pady=6, cursor="hand2")
+        close_btn = tk.Button(btn_row, text="Close", command=root.destroy, bg="#3a3a3a", fg=FG,
                               relief="flat", padx=18, pady=6, cursor="hand2")
 
         last = {'detail': None}
@@ -506,10 +510,17 @@ class TrayManager:
                 if msg != last['detail']:  # don't wipe the user's selection every tick
                     last['detail'] = msg
                     set_detail(msg)
-                detail.pack(pady=(4, 4), padx=24, fill="x", before=close_btn)
+                detail.pack(pady=(4, 4), padx=24, fill="x", before=btn_row)
             else:
                 last['detail'] = None
                 detail.pack_forget()
+            # Offer the one-click fix only while something is actually wrong, and
+            # only where firewall_service can really carry it out.
+            if state == 'problem' and firewall_service.supported():
+                # before=: Close is already packed, and pack appends by default
+                fix_btn.pack(side="left", padx=(0, 8), before=close_btn)
+            else:
+                fix_btn.pack_forget()
             # Setting a textvariable clears any selection; only update on change
             new_url = mdns_service.url(self.port)
             if url_var.get() != new_url:
@@ -540,10 +551,48 @@ class TrayManager:
                 daemon=True).start()
             poll_save()
 
+        fix_result = []  # apply() blocks on the elevation prompt; run it off the UI thread
+
+        def poll_fix():
+            if not fix_result:
+                root.after(200, poll_fix)
+                return
+            ok, msg = fix_result.pop()
+            feedback.config(text=msg, fg=(OK_GREEN if ok else ERR_RED))
+            fix_btn.config(state="normal")
+            if ok:
+                mdns_service.recheck()  # the verdict on screen is now stale
+
+        def do_fix():
+            https_port = None
+            try:
+                import tls_service
+                https_port = tls_service.port()
+            except Exception:
+                pass
+            entries = firewall_service.ports_to_open(self.port, https_port)
+            changes = firewall_service.plan(entries)
+            # Changing firewall rules needs consent, not just a click: list the
+            # changes first, since they are made with administrator rights.
+            if not messagebox.askokcancel(
+                    "Allow Lan-clip through the firewall",
+                    "Windows will ask for administrator rights, and Lan-clip will then:\n\n"
+                    + "\n\n".join(f"• {line}" for line in changes)
+                    + "\n\nContinue?", parent=root):
+                return
+            fix_btn.config(state="disabled")
+            feedback.config(text="Waiting for administrator approval...", fg=MUTED)
+            threading.Thread(target=lambda: fix_result.append(firewall_service.apply(entries)),
+                             daemon=True).start()
+            poll_fix()
+
+        fix_btn.config(command=do_fix)
+
         save_btn = tk.Button(row, text="Save", command=do_save, bg="#3a3a3a", fg=FG,
                              relief="flat", padx=14, pady=4, cursor="hand2")
         save_btn.pack(side="left")
-        close_btn.pack(pady=(10, 16))
+        btn_row.pack(pady=(10, 16))
+        close_btn.pack(side="left")
 
         root.bind("<Escape>", lambda e: root.destroy())
         entry.bind("<Return>", lambda e: do_save())
