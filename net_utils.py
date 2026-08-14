@@ -57,20 +57,28 @@ def pick_free_loopback_port():
     finally:
         s.close()
 
-def _windows_interfaces():
-    """Windows: [(ip, version, adapter_description, is_up)] via GetAdaptersAddresses.
+_win_iface_struct = None
 
-    Pure stdlib ctypes (no pywin32) so it bundles cleanly into a frozen build.
-    This is the authoritative list - it reports every adapter the OS has, with
-    its real name and link state, instead of guessing from a name lookup."""
+def _windows_iface_struct():
+    """The IP_ADAPTER_ADDRESSES layout, built once and reused for the life of
+    the process.
+
+    These declarations must not be rebuilt per call. ctypes.POINTER() keeps a
+    permanent entry per class object in ctypes._pointer_type_cache, so a fresh
+    set of Structure classes on every call adds cache entries that nothing ever
+    frees - the classes stay reachable forever. The mDNS watchdog calls
+    _windows_interfaces() every few seconds, which leaked roughly 27 KB per call
+    (~19 MB an hour, unbounded).
+
+    Built lazily rather than at module level so this module still imports on
+    macOS and Linux, where ctypes.wintypes does not exist.
+    """
+    global _win_iface_struct
+    if _win_iface_struct is not None:
+        return _win_iface_struct
+
     import ctypes
     from ctypes import wintypes
-
-    AF_UNSPEC, AF_INET, AF_INET6 = 0, 2, 23
-    GAA_FLAGS = 0x0002 | 0x0004 | 0x0008  # skip anycast, multicast, DNS servers
-    ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW = 0, 111
-    IF_OPER_STATUS_UP = 1
-    IF_TYPE_SOFTWARE_LOOPBACK, IF_TYPE_TUNNEL = 24, 131
 
     class SOCKADDR(ctypes.Structure):
         _fields_ = [("sa_family", wintypes.USHORT), ("sa_data", ctypes.c_ubyte * 26)]
@@ -109,6 +117,26 @@ def _windows_interfaces():
         ("IfType", wintypes.DWORD),
         ("OperStatus", ctypes.c_int),
     ]  # later fields omitted; we read no further than OperStatus and walk via Next
+
+    _win_iface_struct = IP_ADAPTER_ADDRESSES
+    return _win_iface_struct
+
+def _windows_interfaces():
+    """Windows: [(ip, version, adapter_description, is_up)] via GetAdaptersAddresses.
+
+    Pure stdlib ctypes (no pywin32) so it bundles cleanly into a frozen build.
+    This is the authoritative list - it reports every adapter the OS has, with
+    its real name and link state, instead of guessing from a name lookup."""
+    import ctypes
+    from ctypes import wintypes
+
+    AF_UNSPEC, AF_INET, AF_INET6 = 0, 2, 23
+    GAA_FLAGS = 0x0002 | 0x0004 | 0x0008  # skip anycast, multicast, DNS servers
+    ERROR_SUCCESS, ERROR_BUFFER_OVERFLOW = 0, 111
+    IF_OPER_STATUS_UP = 1
+    IF_TYPE_SOFTWARE_LOOPBACK, IF_TYPE_TUNNEL = 24, 131
+
+    IP_ADAPTER_ADDRESSES = _windows_iface_struct()
 
     GetAdaptersAddresses = ctypes.windll.iphlpapi.GetAdaptersAddresses
     GetAdaptersAddresses.restype = wintypes.ULONG
