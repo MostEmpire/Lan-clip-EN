@@ -71,6 +71,8 @@ python app.py --tray # clipboard monitoring mode
 
 ## Changelog
 2026-08-14
+- Fixed zeroconf memory leak
+- Fixed ctypes memory leak
 - Fixed an issue of reporting a block rule that belongs to a network profile that isn't in use.
 - Added a quick Fix firewall button that runs a series of elevated scripts that configure the firewall for the user
 - Fixed a problem where mDNS or QR-code window open could crash the application

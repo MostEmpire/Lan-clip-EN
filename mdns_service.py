@@ -386,6 +386,48 @@ def _health_probe():
     _restart(f"no answer to {_hostname}.local on {ip}")
 
 
+# zeroconf caches every record it overhears from every other device on the LAN
+# and holds it for that record's TTL - commonly 75 minutes. This app only
+# advertises; it never browses, so it never reads that cache. Measured cost is
+# roughly 1 KB per distinct record, which on a busy network makes the cache the
+# largest thing in the process over a long session. Keeping our own records and
+# discarding the rest bounds it.
+_CACHE_MAX_RECORDS = 3000
+
+
+def _prune_foreign_cache():
+    """Drop cached records that belong to other devices.
+
+    Best-effort by design: it reaches into zeroconf's internals, so anything
+    unexpected there has to degrade to a no-op rather than take the responder
+    down with it.
+    """
+    zc = _zeroconf
+    if zc is None:
+        return
+    try:
+        table = zc.cache.cache          # {name: {record: record}}
+        if sum(len(v) for v in table.values()) <= _CACHE_MAX_RECORDS:
+            return
+        keep = {f"{_hostname}.local.".lower(),
+                f"{SERVICE_NAME}._http._tcp.local.".lower()}
+        victims = []
+        for name, records in list(table.items()):
+            if str(name).lower() in keep:
+                continue
+            victims.extend(list(records))   # iterating the inner map yields records
+        if not victims:
+            return
+        loop = getattr(zc, 'loop', None)
+        if loop is None or not loop.is_running():
+            return
+        # The cache belongs to zeroconf's event loop, so it must be mutated there.
+        loop.call_soon_threadsafe(zc.cache.async_remove_records, victims)
+        print(f"[mDNS] Released {len(victims)} cached records belonging to other devices")
+    except Exception as e:
+        print(f"[mDNS] Cache prune skipped: {e}")
+
+
 def _health_loop():
     """Watch for the two ways the responder silently stops working: the machine's
     addresses change underneath it, or it stops answering on the advertised one."""
@@ -394,6 +436,7 @@ def _health_loop():
         try:
             if _zeroconf is None:
                 continue
+            _prune_foreign_cache()
             current = _local_ipv4s()
             if current and current != _bound_ips:
                 _restart(f"network addresses changed ({', '.join(sorted(current))})")
