@@ -145,7 +145,24 @@ class TrayManager:
             lines.append(detail)
         return "\n".join(lines)
 
+    def _fix_firewall(self):
+        """Ask for admin rights and allow this program through the macOS firewall.
+
+        Returns the message to show on the next pass of the dialog.
+        """
+        import firewall_service
+        import tls_service
+
+        try:
+            https_port = tls_service.port()
+        except Exception:
+            https_port = None
+        entries = firewall_service.ports_to_open(self.port, https_port)
+        _ok, msg = firewall_service.apply(entries)
+        return msg
+
     def _mdns_dialog(self):
+        import firewall_service
         import mdns_service
 
         notice = None
@@ -155,9 +172,15 @@ class TrayManager:
                 alert = AppKit.NSAlert.alloc().init()
                 alert.setMessageText_("Lan-clip - mDNS")
                 alert.setInformativeText_(self._mdns_status_text(mdns_service, notice))
-                alert.addButtonWithTitle_("Save")
-                alert.addButtonWithTitle_("Re-check")
-                alert.addButtonWithTitle_("Close")
+                # Buttons are built from a list because 'Fix firewall' is conditional,
+                # so the NSAlertNthButtonReturn each title maps to shifts with it.
+                titles = ["Save", "Re-check"]
+                state, _msg = mdns_service.status()
+                if state == 'problem' and firewall_service.supported():
+                    titles.append("Fix firewall")
+                titles.append("Close")
+                for title in titles:
+                    alert.addButtonWithTitle_(title)
 
                 # Frames as ((x, y), (w, h)) tuples: pyobjc converts those to NSRect,
                 # so this doesn't depend on NSMakeRect being re-exported by AppKit.
@@ -188,15 +211,20 @@ class TrayManager:
                 AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
                 response = alert.runModal()
 
-                if response == AppKit.NSAlertFirstButtonReturn:      # Save
+                index = response - AppKit.NSAlertFirstButtonReturn
+                clicked = titles[index] if 0 <= index < len(titles) else "Close"
+                if clicked == "Save":
                     chosen = popup.indexOfSelectedItem()
                     value = adapters[chosen][1] if 0 <= chosen < len(adapters) else None
                     # Blocks ~1-2s on the mDNS re-registration probe; the dialog is
                     # already dismissed at this point, so nothing looks frozen.
                     _ok, notice = mdns_service.set_settings(str(name_field.stringValue()), value)
-                elif response == AppKit.NSAlertSecondButtonReturn:   # Re-check
+                elif clicked == "Re-check":
                     mdns_service.recheck()
                     notice = "Re-checking..."
+                elif clicked == "Fix firewall":
+                    notice = self._fix_firewall()
+                    mdns_service.recheck()  # the verdict on screen is now stale
                 else:
                     return
         except Exception as e:
