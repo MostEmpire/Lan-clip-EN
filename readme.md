@@ -70,6 +70,9 @@ python app.py --tray # clipboard monitoring mode
 ```
 
 ## Changelog
+2026-08-14
+- Fixed a problem where mDNS or QR-code window open could crash the application
+
 2026-08-03
 - Version 1.2.0
 - Fixed mDNS and QR-Codes window staying behind other windows when the user tries to open them again thrugh the tray

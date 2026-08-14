@@ -1,4 +1,5 @@
 import os
+import gc
 import io
 import webbrowser
 import threading
@@ -99,6 +100,28 @@ class TrayManager:
         webbrowser.open(net_utils.format_url('127.0.0.1', self.port))
 
     @staticmethod
+    def _run_window(worker):
+        """Run a Tk window worker, then collect its interpreter on this thread.
+
+        A Tk interpreter may only be torn down by the thread that created it.
+        destroy() just closes the window; the Python Tk object survives inside a
+        reference cycle until the cyclic collector happens to run - and if that
+        collection happens on some other thread, Tcl aborts the whole process
+        with "Tcl_AsyncDelete: async handler deleted by the wrong thread"
+        (exit code 0x80000003). That is not theoretical: it killed the app from
+        the mDNS watchdog thread, which merely allocated while enumerating
+        network adapters and thereby triggered the collection.
+
+        Collecting here - after the worker's frame is gone, so its widgets,
+        variables and root are unreferenced - runs those finalizers on the
+        owning thread, where they are safe.
+        """
+        try:
+            worker()
+        finally:
+            gc.collect()
+
+    @staticmethod
     def _claim_foreground(window):
         """Windows only: try to make `window` the foreground one; True if allowed.
 
@@ -170,7 +193,8 @@ class TrayManager:
         # Tk is not thread-safe, so the raise is requested by flag and carried out
         # by the thread that owns the window (see the poll in _qr_window_worker).
         self._qr_raise = threading.Event()
-        self._qr_thread = threading.Thread(target=self._qr_window_worker, daemon=True)
+        self._qr_thread = threading.Thread(target=self._run_window,
+                                           args=(self._qr_window_worker,), daemon=True)
         self._qr_thread.start()
 
     def _build_server_urls(self):
@@ -341,7 +365,8 @@ class TrayManager:
             return
         mdns_service.recheck()  # verify now, so the verdict on screen is current
         self._mdns_raise = threading.Event()
-        self._mdns_thread = threading.Thread(target=self._mdns_window_worker, daemon=True)
+        self._mdns_thread = threading.Thread(target=self._run_window,
+                                             args=(self._mdns_window_worker,), daemon=True)
         self._mdns_thread.start()
 
     def _mdns_window_worker(self):
