@@ -56,6 +56,7 @@ _port = None
 _start_error = None
 _atexit_registered = False
 _reach_warnings = None  # None = self-check still running; [] = no issues found
+_ip_versions = 'IPv4 only'  # which protocols the responder actually answers on
 _advertised_ip = None   # the single IPv4 the name currently resolves to
 _advert_note = None     # set when the configured adapter was unavailable (fallback)
 _watch_thread = None    # health watchdog (see _health_loop)
@@ -105,6 +106,11 @@ def hostname():
 def adapter():
     """The configured source adapter (description or IP), None = auto."""
     return _adapter
+
+
+def ip_versions():
+    """Which IP protocols the responder is answering on, for diagnostics."""
+    return _ip_versions
 
 
 def advertised_ip():
@@ -601,10 +607,11 @@ def start(port):
     """
     global _zeroconf, _info, _port, _start_error, _atexit_registered
     global _advertised_ip, _advert_note, _reach_warnings, _bound_ips, _probe_countdown
+    global _ip_versions
     _port = port
     _reach_warnings = None  # a fresh registration deserves a fresh verdict
     try:
-        from zeroconf import ServiceInfo, Zeroconf
+        from zeroconf import IPVersion, ServiceInfo, Zeroconf
     except ImportError:
         _start_error = f"The 'zeroconf' package is not installed - {_hostname}.local is disabled."
         print(f"[mDNS] {_start_error}")
@@ -634,10 +641,30 @@ def start(port):
                 server=f"{_hostname}.local.",
                 properties={"path": "/"},
             )
-            zc = Zeroconf()
+            # Listen on IPv6 as well as IPv4, but keep advertising only the A
+            # record. iOS asks over ff02::fb FIRST and waits about a second for a
+            # reply before retrying on IPv4, so an IPv4-only responder costs every
+            # Apple client that second - and fails outright on links where IPv4
+            # multicast is filtered while IPv6 is not, all while the IPv4 self-probe
+            # still reports everything healthy.
+            #
+            # No AAAA record though: the web server binds 0.0.0.0 and the TLS
+            # listener is AF_INET, so advertising an IPv6 address would send iOS -
+            # which prefers IPv6 - to a port nothing listens on.
+            try:
+                zc = Zeroconf(ip_version=IPVersion.All)
+                _ip_versions = 'IPv4 + IPv6'
+            except Exception as e:
+                # IPv6 can be switched off for the machine or for one adapter.
+                print(f"[mDNS] IPv6 is unavailable ({e}); answering on IPv4 only. "
+                      "Apple devices will take about a second longer to resolve "
+                      f"{_hostname}.local.")
+                zc = Zeroconf()
+                _ip_versions = 'IPv4 only'
             zc.register_service(info)
         except Exception as e:
-            _start_error = f"Could not advertise {_hostname}.local: {e}"
+            _start_error = (f"Could not advertise {_hostname}.local: "
+                            f"{type(e).__name__}{f': {e}' if str(e) else ''}")
             print(f"[mDNS] {_start_error}")
             return False
         _zeroconf, _info = zc, info
@@ -649,7 +676,7 @@ def start(port):
     if not _atexit_registered:
         atexit.register(stop)
         _atexit_registered = True
-    print(f"[mDNS] Advertising {url(port)} -> {ip}")
+    print(f"[mDNS] Advertising {url(port)} -> {ip} ({_ip_versions})")
     # Registration only proves we bound a socket; whether OTHER devices can query
     # us depends on the OS firewall and on those sockets still matching the live
     # network. Check in the background (the COM / subprocess probes can take a few
