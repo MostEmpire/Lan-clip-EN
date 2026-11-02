@@ -904,6 +904,10 @@ if __name__ == '__main__':
     parser.add_argument('--no-tray', action='store_true', help='Disable system tray mode (run the web server only)')
     parser.add_argument('--no-https', action='store_true',
                         help='Serve plain HTTP only (skip the self-issued certificate and the TLS port)')
+    parser.add_argument('--host', default='0.0.0.0',
+                        help='Address to listen on (default: 0.0.0.0; use 127.0.0.1 behind a reverse proxy)')
+    parser.add_argument('--no-mdns', action='store_true',
+                        help='Do not advertise clip.local over mDNS (e.g. when a reverse proxy serves a DNS name)')
     args = parser.parse_args()
 
     if args.port is not None:
@@ -956,12 +960,12 @@ if __name__ == '__main__':
 
     def start_server():
         print(f"Server running on {net_utils.format_url('localhost', port)}")
-        mdns_active = mdns_service.start(port)
+        mdns_active = False if args.no_mdns else mdns_service.start(port)
         https_urls, ca_url = ([], None) if args.no_https else start_https(mdns_active)
         net_utils.display_server_info(port,
                                       mdns_url=mdns_service.url(port) if mdns_active else None,
                                       https_urls=https_urls, ca_url=ca_url)
-        serve(app, host="0.0.0.0", port=port)
+        serve(app, host=args.host, port=port)
 
     if use_tray:
         # Tray mode: start the server in a background thread

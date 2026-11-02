@@ -70,6 +70,10 @@ python app.py --tray # clipboard monitoring mode
 ```
 
 ## Changelog
+2026-11-02
+- Added --host to choose the listening address (default 0.0.0.0; use 127.0.0.1 when a reverse proxy sits in front of the app)
+- Added --no-mdns to skip advertising clip.local, for setups where a reverse proxy already serves a real DNS name
+
 2026-09-24
 - The mDNS responder now answers over IPv6 as well as IPv4. Apple devices query over IPv6 first, so they no longer wait about a second before falling back to IPv4, and clip.local now resolves on networks where IPv4 multicast is filtered but IPv6 is not
 - mDNS registration failures now name the error type, instead of printing an empty reason for exceptions that carry no message (such as a name collision)
